@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format-check": "prettier --check ."
+  },
+  "dependencies": {
+    "react": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "prettier": "^3.9.4",
+    "typescript": "^6.0.3"
+  }
+}
