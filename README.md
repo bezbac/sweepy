@@ -22,7 +22,8 @@ materialize-prop --component Button --prop className
 
 Flags:
 
-- `--prop` — Prop name to materialize. Defaults to `className`.
+- `--prop` — Prop name to materialize.
+- `--yes`, `-y` — Save changes without asking for confirmation.
 
 - Finds JSX usages and destructured prop defaults with supported string or numeric prop values.
 - Rewrites the prop type to a strict union of discovered values. Inline object props are first extracted to a named `type` above the component.
@@ -54,13 +55,13 @@ Flags:
 For example, the above rewrites:
 
 ```tsx
-<Logo className="h-8 w-8" />;
+<Logo className="h-8 w-8" />
 ```
 
 to:
 
 ```tsx
-<Logo size={32} />;
+<Logo size={32} />
 ```
 
 If a selected prop is typed as `string`, `number`, or another non-literal type, the command stops and asks you to run `materialize-prop` first.
@@ -92,7 +93,7 @@ For example, the above rewrites:
 <Logo
   size={28}
   className="hidden scale-120 group-data-[collapsible=icon]:block"
-/>;
+/>
 ```
 
 to:
@@ -100,7 +101,7 @@ to:
 ```tsx
 <div className="hidden scale-120 group-data-[collapsible=icon]:block">
   <Logo size={28} />
-</div>;
+</div>
 ```
 
 The source value is removed from the component prop definition. Dynamic or unsupported usages are reported and left unchanged.
