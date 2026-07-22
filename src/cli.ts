@@ -7,6 +7,7 @@ import { Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
 import { materializeProp } from "./commands/materialize-prop.js";
+import { replacePropValue } from "./commands/replace-prop-value.js";
 
 const packageJson = createRequire(import.meta.url)("../package.json") as {
   readonly version: string;
@@ -69,8 +70,48 @@ const materializePropCommand = Command.make(
   ),
 );
 
+const replacePropValueCommand = Command.make(
+  "replace-prop-value",
+  {
+    ...globalFlags,
+    sourceProp: Flag.string("source-prop").pipe(
+      Flag.withDescription("Prop to replace from"),
+    ),
+    sourceValue: Flag.string("source-value").pipe(
+      Flag.withDescription("Value to replace from"),
+    ),
+    targetProp: Flag.string("target-prop").pipe(
+      Flag.withDescription("Prop to replace to"),
+    ),
+    targetValue: Flag.string("target-value").pipe(
+      Flag.withDescription("Value to replace to"),
+    ),
+    yes: Flag.boolean("yes").pipe(
+      Flag.withAlias("y"),
+      Flag.withDescription("Save changes without confirmation"),
+    ),
+  },
+  (options) =>
+    replacePropValue({
+      repositoryRoot: process.cwd(),
+      componentName: options.component,
+      propsTypeName: Option.getOrElse(
+        options.propsType,
+        () => `${options.component}Props`,
+      ),
+      searchRoot: options.searchRoot,
+      tsconfigPath: options.tsconfig,
+      componentFile: Option.getOrUndefined(options.componentFile),
+      sourcePropName: options.sourceProp,
+      sourceValue: options.sourceValue,
+      targetPropName: options.targetProp,
+      targetValue: options.targetValue,
+      yes: options.yes,
+    }),
+).pipe(Command.withDescription("Replace one static component prop value"));
+
 const rootCommand = Command.make("sweepy").pipe(
-  Command.withSubcommands([materializePropCommand]),
+  Command.withSubcommands([materializePropCommand, replacePropValueCommand]),
 );
 
 Command.run(rootCommand, { version: packageJson.version }).pipe(
