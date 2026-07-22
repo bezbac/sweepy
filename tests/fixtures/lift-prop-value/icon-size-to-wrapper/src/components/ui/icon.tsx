@@ -2,8 +2,8 @@ import React from "react";
 import type { ReactNode } from "react";
 
 export type IconProps = {
-  className?: "h-6 w-6" | "dynamic";
-  size?: 16 | 32;
+  className?: "h-6 w-6" | "h-8 w-8" | "dynamic";
+  size?: 16;
   children?: ReactNode;
 };
 

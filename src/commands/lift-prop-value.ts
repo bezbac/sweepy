@@ -12,30 +12,24 @@ import {
   loadPropActionProject,
   removePropValue,
   renderInitializer,
-  renderValue,
   selectValue,
   valuesMatch,
 } from "../prop-action.js";
 
-type ReplacePropValueOptions = PropActionOptions & {
+type LiftPropValueOptions = PropActionOptions & {
   readonly sourcePropName: string;
   readonly sourceValue: string;
-  readonly targetPropName: string;
-  readonly targetValue: string;
+  readonly wrapperName: string;
   readonly yes: boolean;
 };
 
-export class ReplacePropValueError extends Schema.TaggedErrorClass<ReplacePropValueError>(
-  "sweepy/ReplacePropValueError",
-)("ReplacePropValueError", {
+export class LiftPropValueError extends Schema.TaggedErrorClass<LiftPropValueError>(
+  "sweepy/LiftPropValueError",
+)("LiftPropValueError", {
   message: Schema.String,
 }) {}
 
-const prepareReplacement = (options: ReplacePropValueOptions) => {
-  if (options.sourcePropName === options.targetPropName) {
-    throw new Error("Source prop and target prop must be different");
-  }
-
+const prepareLift = (options: LiftPropValueOptions) => {
   const { componentSource, project, properties, sourceFiles } =
     loadPropActionProject(options);
   const sourceProperty = properties.find(
@@ -46,14 +40,6 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
       `Prop ${options.sourcePropName} not found in ${options.propsTypeName}`,
     );
   }
-  const targetProperty = properties.find(
-    (property) => property.getName() === options.targetPropName,
-  );
-  if (targetProperty === undefined) {
-    throw new Error(
-      `Prop ${options.targetPropName} not found in ${options.propsTypeName}`,
-    );
-  }
 
   const sourceValues = getStrictPropValues(sourceProperty);
   if (sourceValues === undefined) {
@@ -61,25 +47,14 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
       `${options.propsTypeName}.${options.sourcePropName} must be materialized first`,
     );
   }
-  const targetValues = getStrictPropValues(targetProperty);
-  if (targetValues === undefined) {
-    throw new Error(
-      `${options.propsTypeName}.${options.targetPropName} must be materialized first`,
-    );
-  }
   const sourceValue = selectValue(
     options.sourceValue,
     sourceValues,
     options.sourcePropName,
   );
-  const targetValue = selectValue(
-    options.targetValue,
-    targetValues,
-    options.targetPropName,
-  );
 
   const unsupported: Array<string> = [];
-  let replacedUsages = 0;
+  let liftedUsages = 0;
 
   for (const sourceFile of sourceFiles) {
     const localComponentNames = getLocalComponentNames(
@@ -92,17 +67,22 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
     const openingElements = [
       ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
       ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement),
-    ];
+    ].sort((left, right) => right.getStart() - left.getStart());
+
     for (const element of openingElements) {
-      if (!localComponentNames.has(element.getTagNameNode().getText())) {
+      if (
+        element.wasForgotten() ||
+        !localComponentNames.has(element.getTagNameNode().getText())
+      ) {
         continue;
       }
-      const attributes = element.getAttributes();
-      const sourceAttribute = attributes.find(
-        (candidate): candidate is JsxAttribute =>
-          Node.isJsxAttribute(candidate) &&
-          candidate.getNameNode().getText() === options.sourcePropName,
-      );
+      const sourceAttribute = element
+        .getAttributes()
+        .find(
+          (candidate): candidate is JsxAttribute =>
+            Node.isJsxAttribute(candidate) &&
+            candidate.getNameNode().getText() === options.sourcePropName,
+        );
       if (sourceAttribute === undefined) continue;
 
       const actualSourceValue = getStaticAttributeValue(sourceAttribute);
@@ -118,31 +98,30 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
         continue;
       }
 
-      const targetAttribute = attributes.find(
-        (candidate): candidate is JsxAttribute =>
-          Node.isJsxAttribute(candidate) &&
-          candidate.getNameNode().getText() === options.targetPropName,
-      );
-      if (targetAttribute !== undefined) {
-        const actualTargetValue = getStaticAttributeValue(targetAttribute);
-        if (
-          actualTargetValue === undefined ||
-          !valuesMatch(options.targetPropName, actualTargetValue, targetValue)
-        ) {
-          unsupported.push(
-            `${path.relative(options.repositoryRoot, sourceFile.getFilePath())}:${sourceAttribute.getStartLineNumber()} ${options.targetPropName} already exists with a different value`,
-          );
-          continue;
-        }
-      } else {
-        element.addAttribute({
-          name: options.targetPropName,
-          initializer: renderInitializer(targetValue),
-        });
+      sourceAttribute.remove();
+      const wrapperAttribute = `${options.sourcePropName}=${renderInitializer(sourceValue)}`;
+
+      if (Node.isJsxSelfClosingElement(element)) {
+        const componentText = element.getText();
+        element.replaceWithText(
+          `<${options.wrapperName} ${wrapperAttribute}>${componentText}</${options.wrapperName}>`,
+        );
+        liftedUsages += 1;
+        continue;
       }
 
-      sourceAttribute.remove();
-      replacedUsages += 1;
+      const jsxElement = element.getParent();
+      if (!Node.isJsxElement(jsxElement)) {
+        unsupported.push(
+          `${path.relative(options.repositoryRoot, sourceFile.getFilePath())}:${element.getStartLineNumber()} could not find full ${options.componentName} JSX element`,
+        );
+        continue;
+      }
+      const componentText = jsxElement.getText();
+      jsxElement.replaceWithText(
+        `<${options.wrapperName} ${wrapperAttribute}>${componentText}</${options.wrapperName}>`,
+      );
+      liftedUsages += 1;
     }
   }
 
@@ -152,15 +131,6 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
     sourceValues,
     sourceValue,
   );
-  if (
-    !targetValues.some((value) =>
-      valuesMatch(options.targetPropName, value, targetValue),
-    )
-  ) {
-    targetProperty.setType(
-      [...targetValues, targetValue].map(renderValue).join(" | "),
-    );
-  }
 
   for (const sourceFile of project.getSourceFiles()) {
     if (sourceFile.isSaved()) continue;
@@ -176,27 +146,27 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
 
   return {
     changedFiles,
+    liftedUsages,
     project,
-    replacedUsages,
     unsupported,
     yes: options.yes,
   };
 };
 
-const toReplacePropValueError = (cause: unknown) =>
-  new ReplacePropValueError({
+const toLiftPropValueError = (cause: unknown) =>
+  new LiftPropValueError({
     message: cause instanceof Error ? cause.message : String(cause),
   });
 
-export const replacePropValue = (options: ReplacePropValueOptions) =>
+export const liftPropValue = (options: LiftPropValueOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, project, replacedUsages, unsupported, yes } =
+    const { changedFiles, liftedUsages, project, unsupported, yes } =
       yield* Effect.try({
-        try: () => prepareReplacement(options),
-        catch: toReplacePropValueError,
+        try: () => prepareLift(options),
+        catch: toLiftPropValueError,
       });
 
-    yield* Console.log(`Replaced ${replacedUsages} usage(s).`);
+    yield* Console.log(`Lifted ${liftedUsages} usage(s).`);
     if (unsupported.length > 0) {
       yield* Console.log(
         `Unsupported usages left unchanged:\n${unsupported.map((item) => `  ${item}`).join("\n")}`,
@@ -204,23 +174,23 @@ export const replacePropValue = (options: ReplacePropValueOptions) =>
     }
     if (changedFiles.length === 0) {
       yield* Console.log("No changes.");
-      return { changedFiles, replacedUsages, unsupported };
+      return { changedFiles, liftedUsages, unsupported };
     }
 
     if (!yes) {
       const shouldSave = yield* confirm(
         `Files to update:\n${changedFiles.map((file) => `  ${file}`).join("\n")}\nSave these changes?`,
-      ).pipe(Effect.mapError(toReplacePropValueError));
+      ).pipe(Effect.mapError(toLiftPropValueError));
       if (!shouldSave) {
         yield* Console.log("Changes discarded.");
-        return { changedFiles: [], replacedUsages, unsupported };
+        return { changedFiles: [], liftedUsages, unsupported };
       }
     }
 
     yield* Effect.tryPromise({
       try: () => project.save(),
-      catch: toReplacePropValueError,
+      catch: toLiftPropValueError,
     });
     yield* Console.log(`Updated ${changedFiles.length} file(s).`);
-    return { changedFiles, replacedUsages, unsupported };
+    return { changedFiles, liftedUsages, unsupported };
   });

@@ -9,11 +9,11 @@ function Wrapper({ size, children }: { size: 32; children: ReactNode }) {
 export function Icons({ className }: { className: IconProps["className"] }) {
   return (
     <div>
-      <Icon className="h-8 w-8">Featured</Icon>
-      <Icon className="h-8 w-8" size={32} />
-      <Icon className="h-8 w-8" size={16} />
+      <div className="h-8 w-8"><Icon>Featured</Icon></div>
+      <div className="h-8 w-8"><Icon size={32} /></div>
+      <div className="h-8 w-8"><Icon size={16} /></div>
       <Icon className={className} />
-      <Mark className="h-8 w-8" />
+      <div className="h-8 w-8"><Mark /></div>
       <Icon className="h-6 w-6" />
     </div>
   );

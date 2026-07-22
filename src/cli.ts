@@ -7,6 +7,7 @@ import { Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
 import { materializeProp } from "./commands/materialize-prop.js";
+import { liftPropValue } from "./commands/lift-prop-value.js";
 import { replacePropValue } from "./commands/replace-prop-value.js";
 
 const packageJson = createRequire(import.meta.url)("../package.json") as {
@@ -110,8 +111,49 @@ const replacePropValueCommand = Command.make(
     }),
 ).pipe(Command.withDescription("Replace one static component prop value"));
 
+const liftPropValueCommand = Command.make(
+  "lift-prop-value",
+  {
+    ...globalFlags,
+    sourceProp: Flag.string("source-prop").pipe(
+      Flag.withDescription("Prop to lift"),
+    ),
+    sourceValue: Flag.string("source-value").pipe(
+      Flag.withDescription("Value to lift"),
+    ),
+    wrapper: Flag.string("wrapper").pipe(
+      Flag.withDefault("div"),
+      Flag.withDescription("Wrapper component or tag"),
+    ),
+    yes: Flag.boolean("yes").pipe(
+      Flag.withAlias("y"),
+      Flag.withDescription("Save changes without confirmation"),
+    ),
+  },
+  (options) =>
+    liftPropValue({
+      repositoryRoot: process.cwd(),
+      componentName: options.component,
+      propsTypeName: Option.getOrElse(
+        options.propsType,
+        () => `${options.component}Props`,
+      ),
+      searchRoot: options.searchRoot,
+      tsconfigPath: options.tsconfig,
+      componentFile: Option.getOrUndefined(options.componentFile),
+      sourcePropName: options.sourceProp,
+      sourceValue: options.sourceValue,
+      wrapperName: options.wrapper,
+      yes: options.yes,
+    }),
+).pipe(Command.withDescription("Lift one static prop value to a wrapper"));
+
 const rootCommand = Command.make("sweepy").pipe(
-  Command.withSubcommands([materializePropCommand, replacePropValueCommand]),
+  Command.withSubcommands([
+    materializePropCommand,
+    replacePropValueCommand,
+    liftPropValueCommand,
+  ]),
 );
 
 Command.run(rootCommand, { version: packageJson.version }).pipe(

@@ -10,7 +10,7 @@ export function Icons({ className }: { className: IconProps["className"] }) {
   return (
     <div>
       <Icon className="h-8 w-8">Featured</Icon>
-      <Icon className="h-8 w-8" size={32} />
+      <Wrapper size={32}><Icon className="h-8 w-8" /></Wrapper>
       <Icon className="h-8 w-8" size={16} />
       <Icon className={className} />
       <Mark className="h-8 w-8" />
