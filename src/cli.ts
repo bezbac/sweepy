@@ -15,6 +15,7 @@ import {
   isSweepyError,
   type SweepyError,
 } from "./errors";
+import { formatUnsupportedCases } from "./unsupported-case";
 
 const packageJson = createRequire(import.meta.url)("../package.json") as {
   readonly version: string;
@@ -70,7 +71,9 @@ const formatCommandError = (error: SweepyError) => {
     return `Component ${JSON.stringify(error.componentName)} uses an unsupported declaration.`;
   }
   if (error._tag === "NoSupportedPropValuesError") {
-    return `No supported values were found for ${JSON.stringify(`${error.componentName}.${error.propName}`)}.`;
+    const message = `No supported values were found for ${JSON.stringify(`${error.componentName}.${error.propName}`)}.`;
+    if (error.unsupported.length === 0) return message;
+    return `${message}\nUnsupported usages:\n${formatUnsupportedCases(error.unsupported)}`;
   }
   if (error._tag === "InvalidClassNameFragmentsError") {
     return `className concatenation requires string fragments, but received ${formatValue(error.left)} and ${formatValue(error.right)}.`;

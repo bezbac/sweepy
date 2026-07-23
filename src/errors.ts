@@ -1,5 +1,7 @@
 import { Data } from "effect";
 
+import type { UnsupportedCase } from "./unsupported-case";
+
 /** The explicit component file could not be loaded into the project. */
 export class ComponentFileNotFoundError extends Data.TaggedError(
   "ComponentFileNotFoundError",
@@ -83,6 +85,7 @@ export class NoSupportedPropValuesError extends Data.TaggedError(
 )<{
   readonly componentName: string;
   readonly propName: string;
+  readonly unsupported: ReadonlyArray<UnsupportedCase>;
 }> {}
 
 /** A className concatenation unexpectedly contained a non-string fragment. */

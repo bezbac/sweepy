@@ -32,6 +32,10 @@ import {
   getLocalComponentNames,
   getOrExtractPropsDeclaration,
 } from "../prop-action";
+import {
+  formatUnsupportedCases,
+  type UnsupportedCase,
+} from "../unsupported-case";
 
 type MaterializedValue = string | number;
 type FiniteValue = MaterializedValue | undefined;
@@ -619,7 +623,7 @@ const prepareMaterialization = ({
 
   const isClassName = propName === "className";
   const discoveredValues = new Map<string, MaterializedValue>();
-  const unsupported: Array<string> = [];
+  const unsupported: Array<UnsupportedCase> = [];
 
   const firstParameter = componentFunction.getParameters()[0];
   const bindingPattern = firstParameter?.getNameNode();
@@ -664,9 +668,13 @@ const prepareMaterialization = ({
 
       const expression = getAttributeExpression(attribute);
       if (expression === undefined) {
-        unsupported.push(
-          `${path.relative(repositoryRoot, sourceFile.getFilePath())}:${attribute.getStartLineNumber()} ${attribute.getText()}`,
-        );
+        unsupported.push({
+          kind: "usage",
+          filePath: path.relative(repositoryRoot, sourceFile.getFilePath()),
+          lineNumber: attribute.getStartLineNumber(),
+          source: attribute.getText(),
+          reason: { kind: "prop-value-not-static" },
+        });
         continue;
       }
 
@@ -677,9 +685,13 @@ const prepareMaterialization = ({
 
       const analyzed = analyzeExpression(expression, isClassName);
       if (analyzed === undefined) {
-        unsupported.push(
-          `${path.relative(repositoryRoot, sourceFile.getFilePath())}:${attribute.getStartLineNumber()} ${attribute.getText()}`,
-        );
+        unsupported.push({
+          kind: "usage",
+          filePath: path.relative(repositoryRoot, sourceFile.getFilePath()),
+          lineNumber: attribute.getStartLineNumber(),
+          source: attribute.getText(),
+          reason: { kind: "prop-value-not-static" },
+        });
         continue;
       }
 
@@ -702,6 +714,7 @@ const prepareMaterialization = ({
     throw new NoSupportedPropValuesError({
       componentName,
       propName,
+      unsupported,
     });
   }
 
@@ -741,7 +754,7 @@ export const materializeProp = (options: MaterializePropOptions) =>
 
     if (unsupported.length > 0) {
       yield* Console.log(
-        `Unsupported usages left unchanged:\n${unsupported.map((item) => `  ${item}`).join("\n")}`,
+        `Unsupported usages left unchanged:\n${formatUnsupportedCases(unsupported)}`,
       );
     }
 

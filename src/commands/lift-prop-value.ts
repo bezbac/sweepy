@@ -20,6 +20,10 @@ import {
   selectValue,
   valuesMatch,
 } from "../prop-action";
+import {
+  formatUnsupportedCases,
+  type UnsupportedCase,
+} from "../unsupported-case";
 
 type LiftPropValueOptions = PropActionOptions & {
   readonly sourcePropName: string;
@@ -55,7 +59,7 @@ const prepareLift = (options: LiftPropValueOptions) => {
     options.sourcePropName,
   );
 
-  const unsupported: Array<string> = [];
+  const unsupported: Array<UnsupportedCase> = [];
   let liftedUsages = 0;
 
   for (const sourceFile of sourceFiles) {
@@ -89,9 +93,16 @@ const prepareLift = (options: LiftPropValueOptions) => {
 
       const actualSourceValue = getStaticAttributeValue(sourceAttribute);
       if (actualSourceValue === undefined) {
-        unsupported.push(
-          `${path.relative(options.repositoryRoot, sourceFile.getFilePath())}:${sourceAttribute.getStartLineNumber()} ${sourceAttribute.getText()}`,
-        );
+        unsupported.push({
+          kind: "usage",
+          filePath: path.relative(
+            options.repositoryRoot,
+            sourceFile.getFilePath(),
+          ),
+          lineNumber: sourceAttribute.getStartLineNumber(),
+          source: sourceAttribute.getText(),
+          reason: { kind: "prop-value-not-static" },
+        });
         continue;
       }
       if (
@@ -114,9 +125,19 @@ const prepareLift = (options: LiftPropValueOptions) => {
 
       const jsxElement = element.getParent();
       if (!Node.isJsxElement(jsxElement)) {
-        unsupported.push(
-          `${path.relative(options.repositoryRoot, sourceFile.getFilePath())}:${element.getStartLineNumber()} could not find full ${options.componentName} JSX element`,
-        );
+        unsupported.push({
+          kind: "usage",
+          filePath: path.relative(
+            options.repositoryRoot,
+            sourceFile.getFilePath(),
+          ),
+          lineNumber: element.getStartLineNumber(),
+          source: element.getText(),
+          reason: {
+            kind: "jsx-element-not-found",
+            componentName: options.componentName,
+          },
+        });
         continue;
       }
       const componentText = jsxElement.getText();
@@ -165,7 +186,7 @@ export const liftPropValue = (options: LiftPropValueOptions) =>
     yield* Console.log(`Lifted ${liftedUsages} usage(s).`);
     if (unsupported.length > 0) {
       yield* Console.log(
-        `Unsupported usages left unchanged:\n${unsupported.map((item) => `  ${item}`).join("\n")}`,
+        `Unsupported usages left unchanged:\n${formatUnsupportedCases(unsupported)}`,
       );
     }
     if (changedFiles.length === 0) {

@@ -22,6 +22,10 @@ import {
   selectValue,
   valuesMatch,
 } from "../prop-action";
+import {
+  formatUnsupportedCases,
+  type UnsupportedCase,
+} from "../unsupported-case";
 
 type ReplacePropValueOptions = PropActionOptions & {
   readonly sourcePropName: string;
@@ -85,7 +89,7 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
     options.targetPropName,
   );
 
-  const unsupported: Array<string> = [];
+  const unsupported: Array<UnsupportedCase> = [];
   let replacedUsages = 0;
 
   for (const sourceFile of sourceFiles) {
@@ -114,9 +118,16 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
 
       const actualSourceValue = getStaticAttributeValue(sourceAttribute);
       if (actualSourceValue === undefined) {
-        unsupported.push(
-          `${path.relative(options.repositoryRoot, sourceFile.getFilePath())}:${sourceAttribute.getStartLineNumber()} ${sourceAttribute.getText()}`,
-        );
+        unsupported.push({
+          kind: "usage",
+          filePath: path.relative(
+            options.repositoryRoot,
+            sourceFile.getFilePath(),
+          ),
+          lineNumber: sourceAttribute.getStartLineNumber(),
+          source: sourceAttribute.getText(),
+          reason: { kind: "prop-value-not-static" },
+        });
         continue;
       }
       if (
@@ -136,9 +147,19 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
           actualTargetValue === undefined ||
           !valuesMatch(options.targetPropName, actualTargetValue, targetValue)
         ) {
-          unsupported.push(
-            `${path.relative(options.repositoryRoot, sourceFile.getFilePath())}:${sourceAttribute.getStartLineNumber()} ${options.targetPropName} already exists with a different value`,
-          );
+          unsupported.push({
+            kind: "usage",
+            filePath: path.relative(
+              options.repositoryRoot,
+              sourceFile.getFilePath(),
+            ),
+            lineNumber: sourceAttribute.getStartLineNumber(),
+            source: element.getText(),
+            reason: {
+              kind: "target-prop-conflict",
+              propName: options.targetPropName,
+            },
+          });
           continue;
         }
       } else {
@@ -200,7 +221,7 @@ export const replacePropValue = (options: ReplacePropValueOptions) =>
     yield* Console.log(`Replaced ${replacedUsages} usage(s).`);
     if (unsupported.length > 0) {
       yield* Console.log(
-        `Unsupported usages left unchanged:\n${unsupported.map((item) => `  ${item}`).join("\n")}`,
+        `Unsupported usages left unchanged:\n${formatUnsupportedCases(unsupported)}`,
       );
     }
     if (changedFiles.length === 0) {

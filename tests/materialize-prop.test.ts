@@ -369,6 +369,48 @@ describe("materialize-prop", () => {
     assert.strictEqual(await readProjectFile(projectRoot, buttonPath), before);
   });
 
+  it("reports every unsupported usage when no values can be materialized", async () => {
+    const projectRoot = await createReferenceProject();
+    const componentPath = "src/components/ui/memo-button.tsx";
+    const usagePath = "src/features/dashboard/memo-buttons.tsx";
+    const before = await readProjectFile(projectRoot, componentPath);
+    const usage = await readProjectFile(projectRoot, usagePath);
+    await fs.writeFile(
+      path.join(projectRoot, usagePath),
+      usage
+        .replace('variant="primary"', "variant={window.location.hash}")
+        .replace('variant="secondary"', "variant={window.location.search}"),
+    );
+
+    const result = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "MemoButton",
+      "--prop",
+      "variant",
+      "--yes",
+    ]);
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.include(
+      result.stderr,
+      'No supported values were found for "MemoButton.variant".',
+    );
+    assert.include(result.stderr, "Unsupported usages:");
+    assert.include(
+      result.stderr,
+      "src/features/dashboard/memo-buttons.tsx:6 variant={window.location.hash} (prop value cannot be statically evaluated)",
+    );
+    assert.include(
+      result.stderr,
+      "src/features/dashboard/memo-buttons.tsx:7 variant={window.location.search} (prop value cannot be statically evaluated)",
+    );
+    assert.strictEqual(
+      await readProjectFile(projectRoot, componentPath),
+      before,
+    );
+  });
+
   it("reports an empty search root", async () => {
     const projectRoot = await createReferenceProject();
     await fs.mkdir(path.join(projectRoot, "empty"));

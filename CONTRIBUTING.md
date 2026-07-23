@@ -16,6 +16,10 @@ Preserve known errors when wrapping synchronous or asynchronous dependencies. Us
 
 Generate all user-facing error text in the exhaustive `formatCommandError` function in `src/cli.ts`. Adding an error requires adding its formatter branch. Commands and shared transformation code must not generate error messages or include command presentation details in error values.
 
+## Unsupported Cases
+
+Represent unsafe transformations with structured `UnsupportedCase` values, not strings. Return every case, preserve them on terminal errors, and format them only at CLI boundaries with `formatUnsupportedCases`. Tests must verify complete diagnostics and unchanged unsupported code.
+
 ## Testing
 
 For successful transformations, assert the exit status and resulting fixture files. Do not assert informational CLI output as this is less stable. Reserve output assertions for diagnostics on failure paths.

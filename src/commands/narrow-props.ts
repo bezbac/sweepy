@@ -30,6 +30,10 @@ import {
   getOrExtractPropsDeclaration,
   loadPropActionProject,
 } from "../prop-action";
+import {
+  formatUnsupportedCases,
+  type UnsupportedCase,
+} from "../unsupported-case";
 
 type NarrowPropsOptions = PropActionOptions & {
   readonly yes: boolean;
@@ -181,7 +185,7 @@ const collectUsageNames = ({
   readonly repositoryRoot: string;
 }) => {
   const names = new Set<string>();
-  const unsupported: Array<string> = [];
+  const unsupported: Array<UnsupportedCase> = [];
 
   for (const sourceFile of sourceFiles) {
     const localNames = getLocalComponentNames(
@@ -210,9 +214,13 @@ const collectUsageNames = ({
           new Set(),
         );
         if (spreadNames === undefined) {
-          unsupported.push(
-            `${path.relative(repositoryRoot, sourceFile.getFilePath())}:${attribute.getStartLineNumber()} ${attribute.getText()}`,
-          );
+          unsupported.push({
+            kind: "usage",
+            filePath: path.relative(repositoryRoot, sourceFile.getFilePath()),
+            lineNumber: attribute.getStartLineNumber(),
+            source: attribute.getText(),
+            reason: { kind: "spread-props-not-static" },
+          });
           continue;
         }
         for (const name of spreadNames) {
@@ -397,7 +405,7 @@ const getOriginalPropsSource = ({
 const getUnsupportedPropsReason = (
   source: TypeNode | InterfaceDeclaration | undefined,
 ) => {
-  if (source === undefined) return "props type could not be resolved";
+  if (source === undefined) return { kind: "props-type-not-resolved" } as const;
   if (Node.isInterfaceDeclaration(source)) {
     const supported = source
       .getMembers()
@@ -405,11 +413,13 @@ const getUnsupportedPropsReason = (
         (member) =>
           Node.isPropertySignature(member) || Node.isMethodSignature(member),
       );
-    return supported ? undefined : "props interface has unsupported members";
+    return supported
+      ? undefined
+      : ({ kind: "props-interface-unsupported" } as const);
   }
   return isSupportedTypeNode(source)
     ? undefined
-    : "props type has an unsupported union or member";
+    : ({ kind: "props-type-unsupported" } as const);
 };
 
 const isWithinComponent = (
@@ -450,10 +460,14 @@ const getSharedDeclarationReason = ({
     isWithinComponent(reference, componentFunction, componentName),
   );
   if (componentReferences.length === 0) {
-    return `${propsTypeName} is not the component's props type`;
+    return { kind: "props-type-not-component", propsTypeName } as const;
   }
   if (componentReferences.length !== references.length) {
-    return `${propsTypeName} is shared outside ${componentName}`;
+    return {
+      kind: "props-type-shared",
+      propsTypeName,
+      componentName,
+    } as const;
   }
   return undefined;
 };
@@ -500,7 +514,10 @@ const getComponentEscapeReason = (
 
   return unsupportedReference === undefined
     ? undefined
-    : `${componentName} is referenced through an unsupported alias or wrapper`;
+    : ({
+        kind: "component-unsupported-reference",
+        componentName,
+      } as const);
 };
 
 const removeUnusedMembers = (
@@ -633,9 +650,14 @@ const prepareNarrowing = (options: NarrowPropsOptions) => {
   const unsupported = [...usages.unsupported];
   const usedNames = new Set([...usages.names, ...internal.names]);
   if (internal.ambiguous) {
-    unsupported.push(
-      `${path.relative(options.repositoryRoot, componentSource.getFilePath())}: component props usage cannot be statically enumerated`,
-    );
+    unsupported.push({
+      kind: "component",
+      filePath: path.relative(
+        options.repositoryRoot,
+        componentSource.getFilePath(),
+      ),
+      reason: { kind: "component-props-not-static" },
+    });
   }
   const propsReason = getUnsupportedPropsReason(
     getOriginalPropsSource({
@@ -646,9 +668,14 @@ const prepareNarrowing = (options: NarrowPropsOptions) => {
     }),
   );
   if (propsReason !== undefined) {
-    unsupported.push(
-      `${path.relative(options.repositoryRoot, componentSource.getFilePath())}: ${propsReason}`,
-    );
+    unsupported.push({
+      kind: "component",
+      filePath: path.relative(
+        options.repositoryRoot,
+        componentSource.getFilePath(),
+      ),
+      reason: propsReason,
+    });
   }
   const sharedReason = getSharedDeclarationReason({
     sourceFile: componentSource,
@@ -657,18 +684,28 @@ const prepareNarrowing = (options: NarrowPropsOptions) => {
     propsTypeName: options.propsTypeName,
   });
   if (sharedReason !== undefined) {
-    unsupported.push(
-      `${path.relative(options.repositoryRoot, componentSource.getFilePath())}: ${sharedReason}`,
-    );
+    unsupported.push({
+      kind: "component",
+      filePath: path.relative(
+        options.repositoryRoot,
+        componentSource.getFilePath(),
+      ),
+      reason: sharedReason,
+    });
   }
   const componentEscapeReason = getComponentEscapeReason(
     componentSource,
     options.componentName,
   );
   if (componentEscapeReason !== undefined) {
-    unsupported.push(
-      `${path.relative(options.repositoryRoot, componentSource.getFilePath())}: ${componentEscapeReason}`,
-    );
+    unsupported.push({
+      kind: "component",
+      filePath: path.relative(
+        options.repositoryRoot,
+        componentSource.getFilePath(),
+      ),
+      reason: componentEscapeReason,
+    });
   }
   if (unsupported.length > 0) {
     return {
@@ -719,7 +756,7 @@ export const narrowProps = (options: NarrowPropsOptions) =>
 
     if (unsupported.length > 0) {
       yield* Console.log(
-        `Could not safely narrow props:\n${unsupported.map((item) => `  ${item}`).join("\n")}`,
+        `Could not safely narrow props:\n${formatUnsupportedCases(unsupported)}`,
       );
     }
     if (changedFiles.length === 0) {
