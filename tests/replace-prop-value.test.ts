@@ -56,6 +56,22 @@ describe("replace-prop-value", () => {
     assert.deepStrictEqual(after, before);
   });
 
+  it("prints a diff without writing in dry-run mode", async () => {
+    const projectRoot = await createReferenceProject();
+    const iconPath = "src/components/ui/icon.tsx";
+    const before = await readProjectFile(projectRoot, iconPath);
+
+    const result = await runCliInProject(projectRoot, [
+      ...replaceArgs,
+      "--dry-run",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.include(result.stdout, `--- a/${iconPath}`);
+    assert.include(result.stdout, `+++ b/${iconPath}`);
+    assert.strictEqual(await readProjectFile(projectRoot, iconPath), before);
+  });
+
   it("rejects a loose source prop without writing", async () => {
     const projectRoot = await createReferenceProject();
     const buttonPath = "src/components/ui/button.tsx";

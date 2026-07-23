@@ -119,6 +119,45 @@ describe("materialize-prop", () => {
     assert.deepStrictEqual(after, before);
   });
 
+  it("prints a diff without writing in dry-run mode", async () => {
+    const projectRoot = await createReferenceProject();
+    const buttonPath = "src/components/ui/button.tsx";
+    const before = await readProjectFile(projectRoot, buttonPath);
+
+    const result = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "Button",
+      "--prop",
+      "className",
+      "--dry-run",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.include(result.stdout, `--- a/${buttonPath}`);
+    assert.include(result.stdout, `+++ b/${buttonPath}`);
+    assert.strictEqual(await readProjectFile(projectRoot, buttonPath), before);
+  });
+
+  it("rejects --yes and --dry-run together", async () => {
+    const projectRoot = await createReferenceProject();
+    const result = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "Button",
+      "--prop",
+      "className",
+      "--yes",
+      "--dry-run",
+    ]);
+
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.include(
+      `${result.stdout}\n${result.stderr}`,
+      "--yes and --dry-run cannot be used together",
+    );
+  });
+
   it("is idempotent after the first rewrite", async () => {
     const projectRoot = await createReferenceProject();
     const args = [

@@ -3,7 +3,7 @@ import path from "node:path";
 import { Console, Effect, Schema } from "effect";
 import { type JsxAttribute, Node, SyntaxKind } from "ts-morph";
 
-import { confirm } from "../confirm";
+import { executeChanges } from "../execute-changes";
 import {
   type PropActionOptions,
   getLocalComponentNames,
@@ -23,6 +23,7 @@ type ReplacePropValueOptions = PropActionOptions & {
   readonly targetPropName: string;
   readonly targetValue: string;
   readonly yes: boolean;
+  readonly dryRun: boolean;
 };
 
 class ReplacePropValueError extends Schema.TaggedErrorClass<ReplacePropValueError>(
@@ -179,7 +180,6 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
     project,
     replacedUsages,
     unsupported,
-    yes: options.yes,
   };
 };
 
@@ -190,7 +190,7 @@ const toReplacePropValueError = (cause: unknown) =>
 
 export const replacePropValue = (options: ReplacePropValueOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, project, replacedUsages, unsupported, yes } =
+    const { changedFiles, project, replacedUsages, unsupported } =
       yield* Effect.try({
         try: () => prepareReplacement(options),
         catch: toReplacePropValueError,
@@ -207,20 +207,16 @@ export const replacePropValue = (options: ReplacePropValueOptions) =>
       return { changedFiles, replacedUsages, unsupported };
     }
 
-    if (!yes) {
-      const shouldSave = yield* confirm(
-        `Files to update:\n${changedFiles.map((file) => `  ${file}`).join("\n")}\nSave these changes?`,
-      ).pipe(Effect.mapError(toReplacePropValueError));
-      if (!shouldSave) {
-        yield* Console.log("Changes discarded.");
-        return { changedFiles: [], replacedUsages, unsupported };
-      }
-    }
-
-    yield* Effect.tryPromise({
-      try: () => project.save(),
-      catch: toReplacePropValueError,
-    });
-    yield* Console.log(`Updated ${changedFiles.length} file(s).`);
-    return { changedFiles, replacedUsages, unsupported };
+    const saved = yield* executeChanges({
+      project,
+      changedFiles,
+      repositoryRoot: options.repositoryRoot,
+      yes: options.yes,
+      dryRun: options.dryRun,
+    }).pipe(Effect.mapError(toReplacePropValueError));
+    return {
+      changedFiles: saved ? changedFiles : [],
+      replacedUsages,
+      unsupported,
+    };
   });

@@ -95,6 +95,25 @@ describe("narrow-props", () => {
     );
   });
 
+  it("prints a diff without writing in dry-run mode", async () => {
+    const projectRoot = await createReferenceProject();
+    const componentPath = "src/components/ui/narrow-button.tsx";
+    const before = await readProjectFile(projectRoot, componentPath);
+
+    const result = await runCliInProject(projectRoot, [
+      ...narrowArgs,
+      "--dry-run",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.include(result.stdout, `--- a/${componentPath}`);
+    assert.include(result.stdout, `+++ b/${componentPath}`);
+    assert.strictEqual(
+      await readProjectFile(projectRoot, componentPath),
+      before,
+    );
+  });
+
   it("leaves shared prop declarations unchanged", async () => {
     const projectRoot = await createReferenceProject();
     const componentPath = "src/components/ui/narrow-button.tsx";

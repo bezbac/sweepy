@@ -13,7 +13,7 @@ import {
   type TypeLiteralNode,
 } from "ts-morph";
 
-import { confirm } from "../confirm";
+import { executeChanges } from "../execute-changes";
 import {
   type ComponentFunction,
   getComponentFunction,
@@ -41,6 +41,7 @@ type MaterializePropOptions = {
   readonly componentFile: string | undefined;
   readonly propName: string;
   readonly yes: boolean;
+  readonly dryRun: boolean;
 };
 
 class MaterializePropError extends Schema.TaggedErrorClass<MaterializePropError>(
@@ -372,7 +373,6 @@ const prepareMaterialization = ({
   tsconfigPath,
   componentFile,
   propName,
-  yes,
 }: MaterializePropOptions) => {
   const absoluteTsconfig = path.resolve(repositoryRoot, tsconfigPath);
   const absoluteSearchRoot = path.resolve(repositoryRoot, searchRoot);
@@ -515,7 +515,7 @@ const prepareMaterialization = ({
       path.relative(repositoryRoot, sourceFile.getFilePath()),
     );
 
-  return { project, changedFiles, unsupported, yes };
+  return { project, changedFiles, unsupported };
 };
 
 const toMaterializePropError = (cause: unknown) =>
@@ -525,7 +525,7 @@ const toMaterializePropError = (cause: unknown) =>
 
 export const materializeProp = (options: MaterializePropOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, project, unsupported, yes } = yield* Effect.try({
+    const { changedFiles, project, unsupported } = yield* Effect.try({
       try: () => prepareMaterialization(options),
       catch: toMaterializePropError,
     });
@@ -541,20 +541,12 @@ export const materializeProp = (options: MaterializePropOptions) =>
       return { changedFiles, unsupported };
     }
 
-    if (!yes) {
-      const shouldSave = yield* confirm(
-        `Files to update:\n${changedFiles.map((file) => `  ${file}`).join("\n")}\nSave these changes?`,
-      ).pipe(Effect.mapError(toMaterializePropError));
-      if (!shouldSave) {
-        yield* Console.log("Changes discarded.");
-        return { changedFiles: [], unsupported };
-      }
-    }
-
-    yield* Effect.tryPromise({
-      try: () => project.save(),
-      catch: toMaterializePropError,
-    });
-    yield* Console.log(`Updated ${changedFiles.length} file(s).`);
-    return { changedFiles, unsupported };
+    const saved = yield* executeChanges({
+      project,
+      changedFiles,
+      repositoryRoot: options.repositoryRoot,
+      yes: options.yes,
+      dryRun: options.dryRun,
+    }).pipe(Effect.mapError(toMaterializePropError));
+    return { changedFiles: saved ? changedFiles : [], unsupported };
   });

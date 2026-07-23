@@ -3,7 +3,7 @@
 import { createRequire } from "node:module";
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Effect, Option } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
 import { liftPropValue } from "./commands/lift-prop-value";
@@ -14,6 +14,25 @@ import { replacePropValue } from "./commands/replace-prop-value";
 const packageJson = createRequire(import.meta.url)("../package.json") as {
   readonly version: string;
 };
+
+class CliOptionsError extends Schema.TaggedErrorClass<CliOptionsError>(
+  "sweepy/CliOptionsError",
+)("CliOptionsError", {
+  message: Schema.String,
+}) {}
+
+const withWriteModeValidation = <A, E, R>(
+  options: { readonly yes: boolean; readonly dryRun: boolean },
+  command: Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    if (options.yes && options.dryRun) {
+      return yield* new CliOptionsError({
+        message: "--yes and --dry-run cannot be used together",
+      });
+    }
+    return yield* command;
+  });
 
 const globalFlags = {
   component: Flag.string("component").pipe(
@@ -40,6 +59,13 @@ const globalFlags = {
       "Component definition file; auto-detected when omitted",
     ),
   ),
+  yes: Flag.boolean("yes").pipe(
+    Flag.withAlias("y"),
+    Flag.withDescription("Save changes without confirmation"),
+  ),
+  dryRun: Flag.boolean("dry-run").pipe(
+    Flag.withDescription("Print changes without updating files"),
+  ),
 };
 
 const materializePropCommand = Command.make(
@@ -47,25 +73,25 @@ const materializePropCommand = Command.make(
   {
     ...globalFlags,
     prop: Flag.string("prop").pipe(Flag.withDescription("Prop to materialize")),
-    yes: Flag.boolean("yes").pipe(
-      Flag.withAlias("y"),
-      Flag.withDescription("Save changes without confirmation"),
-    ),
   },
   (options) =>
-    materializeProp({
-      repositoryRoot: process.cwd(),
-      componentName: options.component,
-      propsTypeName: Option.getOrElse(
-        options.propsType,
-        () => `${options.component}Props`,
-      ),
-      searchRoot: options.searchRoot,
-      tsconfigPath: options.tsconfig,
-      componentFile: Option.getOrUndefined(options.componentFile),
-      propName: options.prop,
-      yes: options.yes,
-    }),
+    withWriteModeValidation(
+      options,
+      materializeProp({
+        repositoryRoot: process.cwd(),
+        componentName: options.component,
+        propsTypeName: Option.getOrElse(
+          options.propsType,
+          () => `${options.component}Props`,
+        ),
+        searchRoot: options.searchRoot,
+        tsconfigPath: options.tsconfig,
+        componentFile: Option.getOrUndefined(options.componentFile),
+        propName: options.prop,
+        yes: options.yes,
+        dryRun: options.dryRun,
+      }),
+    ),
 ).pipe(
   Command.withDescription(
     "Materialize a component prop type from its static usages",
@@ -88,28 +114,28 @@ const replacePropValueCommand = Command.make(
     targetValue: Flag.string("target-value").pipe(
       Flag.withDescription("Value to replace to"),
     ),
-    yes: Flag.boolean("yes").pipe(
-      Flag.withAlias("y"),
-      Flag.withDescription("Save changes without confirmation"),
-    ),
   },
   (options) =>
-    replacePropValue({
-      repositoryRoot: process.cwd(),
-      componentName: options.component,
-      propsTypeName: Option.getOrElse(
-        options.propsType,
-        () => `${options.component}Props`,
-      ),
-      searchRoot: options.searchRoot,
-      tsconfigPath: options.tsconfig,
-      componentFile: Option.getOrUndefined(options.componentFile),
-      sourcePropName: options.sourceProp,
-      sourceValue: options.sourceValue,
-      targetPropName: options.targetProp,
-      targetValue: options.targetValue,
-      yes: options.yes,
-    }),
+    withWriteModeValidation(
+      options,
+      replacePropValue({
+        repositoryRoot: process.cwd(),
+        componentName: options.component,
+        propsTypeName: Option.getOrElse(
+          options.propsType,
+          () => `${options.component}Props`,
+        ),
+        searchRoot: options.searchRoot,
+        tsconfigPath: options.tsconfig,
+        componentFile: Option.getOrUndefined(options.componentFile),
+        sourcePropName: options.sourceProp,
+        sourceValue: options.sourceValue,
+        targetPropName: options.targetProp,
+        targetValue: options.targetValue,
+        yes: options.yes,
+        dryRun: options.dryRun,
+      }),
+    ),
 ).pipe(Command.withDescription("Replace one static component prop value"));
 
 const liftPropValueCommand = Command.make(
@@ -126,51 +152,51 @@ const liftPropValueCommand = Command.make(
       Flag.withDefault("div"),
       Flag.withDescription("Wrapper component or tag"),
     ),
-    yes: Flag.boolean("yes").pipe(
-      Flag.withAlias("y"),
-      Flag.withDescription("Save changes without confirmation"),
-    ),
   },
   (options) =>
-    liftPropValue({
-      repositoryRoot: process.cwd(),
-      componentName: options.component,
-      propsTypeName: Option.getOrElse(
-        options.propsType,
-        () => `${options.component}Props`,
-      ),
-      searchRoot: options.searchRoot,
-      tsconfigPath: options.tsconfig,
-      componentFile: Option.getOrUndefined(options.componentFile),
-      sourcePropName: options.sourceProp,
-      sourceValue: options.sourceValue,
-      wrapperName: options.wrapper,
-      yes: options.yes,
-    }),
+    withWriteModeValidation(
+      options,
+      liftPropValue({
+        repositoryRoot: process.cwd(),
+        componentName: options.component,
+        propsTypeName: Option.getOrElse(
+          options.propsType,
+          () => `${options.component}Props`,
+        ),
+        searchRoot: options.searchRoot,
+        tsconfigPath: options.tsconfig,
+        componentFile: Option.getOrUndefined(options.componentFile),
+        sourcePropName: options.sourceProp,
+        sourceValue: options.sourceValue,
+        wrapperName: options.wrapper,
+        yes: options.yes,
+        dryRun: options.dryRun,
+      }),
+    ),
 ).pipe(Command.withDescription("Lift one static prop value to a wrapper"));
 
 const narrowPropsCommand = Command.make(
   "narrow-props",
   {
     ...globalFlags,
-    yes: Flag.boolean("yes").pipe(
-      Flag.withAlias("y"),
-      Flag.withDescription("Save changes without confirmation"),
-    ),
   },
   (options) =>
-    narrowProps({
-      repositoryRoot: process.cwd(),
-      componentName: options.component,
-      propsTypeName: Option.getOrElse(
-        options.propsType,
-        () => `${options.component}Props`,
-      ),
-      searchRoot: options.searchRoot,
-      tsconfigPath: options.tsconfig,
-      componentFile: Option.getOrUndefined(options.componentFile),
-      yes: options.yes,
-    }),
+    withWriteModeValidation(
+      options,
+      narrowProps({
+        repositoryRoot: process.cwd(),
+        componentName: options.component,
+        propsTypeName: Option.getOrElse(
+          options.propsType,
+          () => `${options.component}Props`,
+        ),
+        searchRoot: options.searchRoot,
+        tsconfigPath: options.tsconfig,
+        componentFile: Option.getOrUndefined(options.componentFile),
+        yes: options.yes,
+        dryRun: options.dryRun,
+      }),
+    ),
 ).pipe(Command.withDescription("Narrow component props to their used keys"));
 
 const rootCommand = Command.make("sweepy").pipe(

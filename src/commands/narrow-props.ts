@@ -16,7 +16,7 @@ import {
   VariableDeclarationKind,
 } from "ts-morph";
 
-import { confirm } from "../confirm";
+import { executeChanges } from "../execute-changes";
 import {
   type ComponentFunction,
   type PropActionOptions,
@@ -29,6 +29,7 @@ import {
 
 type NarrowPropsOptions = PropActionOptions & {
   readonly yes: boolean;
+  readonly dryRun: boolean;
 };
 
 class NarrowPropsError extends Schema.TaggedErrorClass<NarrowPropsError>(
@@ -677,7 +678,6 @@ const prepareNarrowing = (options: NarrowPropsOptions) => {
       project,
       unsupported,
       usedProps: [...usedNames].sort(),
-      yes: options.yes,
     };
   }
 
@@ -717,11 +717,12 @@ const toNarrowPropsError = (cause: unknown) =>
 
 export const narrowProps = (options: NarrowPropsOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, project, unsupported, usedProps, yes } =
-      yield* Effect.try({
+    const { changedFiles, project, unsupported, usedProps } = yield* Effect.try(
+      {
         try: () => prepareNarrowing(options),
         catch: toNarrowPropsError,
-      });
+      },
+    );
 
     if (unsupported.length > 0) {
       yield* Console.log(
@@ -733,20 +734,17 @@ export const narrowProps = (options: NarrowPropsOptions) =>
       return { changedFiles, unsupported, usedProps };
     }
 
-    if (!yes) {
-      const shouldSave = yield* confirm(
-        `Used props: ${usedProps.join(", ") || "none"}\nFiles to update:\n${changedFiles.map((file) => `  ${file}`).join("\n")}\nSave these changes?`,
-      ).pipe(Effect.mapError(toNarrowPropsError));
-      if (!shouldSave) {
-        yield* Console.log("Changes discarded.");
-        return { changedFiles: [], unsupported, usedProps };
-      }
-    }
-
-    yield* Effect.tryPromise({
-      try: () => project.save(),
-      catch: toNarrowPropsError,
-    });
-    yield* Console.log(`Updated ${changedFiles.length} file(s).`);
-    return { changedFiles, unsupported, usedProps };
+    yield* Console.log(`Used props: ${usedProps.join(", ") || "none"}`);
+    const saved = yield* executeChanges({
+      project,
+      changedFiles,
+      repositoryRoot: options.repositoryRoot,
+      yes: options.yes,
+      dryRun: options.dryRun,
+    }).pipe(Effect.mapError(toNarrowPropsError));
+    return {
+      changedFiles: saved ? changedFiles : [],
+      unsupported,
+      usedProps,
+    };
   });

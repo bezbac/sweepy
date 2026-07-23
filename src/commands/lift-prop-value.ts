@@ -3,7 +3,7 @@ import path from "node:path";
 import { Console, Effect, Schema } from "effect";
 import { type JsxAttribute, Node, SyntaxKind } from "ts-morph";
 
-import { confirm } from "../confirm";
+import { executeChanges } from "../execute-changes";
 import {
   type PropActionOptions,
   getLocalComponentNames,
@@ -21,6 +21,7 @@ type LiftPropValueOptions = PropActionOptions & {
   readonly sourceValue: string;
   readonly wrapperName: string;
   readonly yes: boolean;
+  readonly dryRun: boolean;
 };
 
 class LiftPropValueError extends Schema.TaggedErrorClass<LiftPropValueError>(
@@ -149,7 +150,6 @@ const prepareLift = (options: LiftPropValueOptions) => {
     liftedUsages,
     project,
     unsupported,
-    yes: options.yes,
   };
 };
 
@@ -160,7 +160,7 @@ const toLiftPropValueError = (cause: unknown) =>
 
 export const liftPropValue = (options: LiftPropValueOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, liftedUsages, project, unsupported, yes } =
+    const { changedFiles, liftedUsages, project, unsupported } =
       yield* Effect.try({
         try: () => prepareLift(options),
         catch: toLiftPropValueError,
@@ -177,20 +177,16 @@ export const liftPropValue = (options: LiftPropValueOptions) =>
       return { changedFiles, liftedUsages, unsupported };
     }
 
-    if (!yes) {
-      const shouldSave = yield* confirm(
-        `Files to update:\n${changedFiles.map((file) => `  ${file}`).join("\n")}\nSave these changes?`,
-      ).pipe(Effect.mapError(toLiftPropValueError));
-      if (!shouldSave) {
-        yield* Console.log("Changes discarded.");
-        return { changedFiles: [], liftedUsages, unsupported };
-      }
-    }
-
-    yield* Effect.tryPromise({
-      try: () => project.save(),
-      catch: toLiftPropValueError,
-    });
-    yield* Console.log(`Updated ${changedFiles.length} file(s).`);
-    return { changedFiles, liftedUsages, unsupported };
+    const saved = yield* executeChanges({
+      project,
+      changedFiles,
+      repositoryRoot: options.repositoryRoot,
+      yes: options.yes,
+      dryRun: options.dryRun,
+    }).pipe(Effect.mapError(toLiftPropValueError));
+    return {
+      changedFiles: saved ? changedFiles : [],
+      liftedUsages,
+      unsupported,
+    };
   });
