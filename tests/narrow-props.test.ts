@@ -36,6 +36,36 @@ describe("narrow-props", () => {
     await assertFixtureFiles(projectRoot, "narrow-props/forward-ref-button");
   });
 
+  it("auto-detects a typed memo component", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "narrow-props",
+      "--component",
+      "MemoButton",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(projectRoot, "narrow-props/memo-button");
+  });
+
+  it("detects a typed memo component at an explicit path", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "narrow-props",
+      "--component",
+      "MemoButton",
+      "--component-file",
+      "src/components/ui/memo-button.tsx",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(projectRoot, "narrow-props/memo-button");
+  });
+
   it("narrows inherited interface props", async () => {
     const projectRoot = await createReferenceProject();
 

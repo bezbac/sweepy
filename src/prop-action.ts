@@ -319,6 +319,20 @@ export const getForwardRefCall = (
   return expression;
 };
 
+const getMemoCall = (
+  initializer: Expression | undefined,
+): CallExpression | undefined => {
+  if (initializer === undefined) return undefined;
+
+  const expression = unwrapExpression(initializer);
+  if (!Node.isCallExpression(expression)) return undefined;
+
+  const callee = expression.getExpression().getText();
+  if (callee !== "memo" && !callee.endsWith(".memo")) return undefined;
+
+  return expression;
+};
+
 export const getComponentFunction = (
   sourceFile: SourceFile,
   componentName: string,
@@ -337,7 +351,9 @@ export const getComponentFunction = (
     return initializer;
   }
 
-  const renderFunction = getForwardRefCall(initializer)?.getArguments()[0];
+  const renderFunction =
+    getForwardRefCall(initializer)?.getArguments()[0] ??
+    getMemoCall(initializer)?.getArguments()[0];
   if (
     renderFunction !== undefined &&
     (Node.isArrowFunction(renderFunction) ||

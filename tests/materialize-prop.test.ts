@@ -190,6 +190,46 @@ describe("materialize-prop", () => {
     );
   });
 
+  it("materializes a prop on an auto-detected typed memo component", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const { exitCode } = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "MemoButton",
+      "--prop",
+      "variant",
+      "--yes",
+    ]);
+
+    assert.strictEqual(exitCode, 0);
+    await assertFixtureFiles(
+      projectRoot,
+      "materialize-prop/memo-button-variant",
+    );
+  });
+
+  it("materializes a prop on a typed memo component at an explicit path", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const { exitCode } = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "MemoButton",
+      "--prop",
+      "variant",
+      "--component-file",
+      "src/components/ui/memo-button.tsx",
+      "--yes",
+    ]);
+
+    assert.strictEqual(exitCode, 0);
+    await assertFixtureFiles(
+      projectRoot,
+      "materialize-prop/memo-button-variant",
+    );
+  });
+
   it("leaves files byte-for-byte unchanged when confirmation is declined", async () => {
     const projectRoot = await createReferenceProject();
     const changedPaths = [
