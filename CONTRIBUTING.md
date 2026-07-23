@@ -8,6 +8,16 @@ Every file in `src/commands/` must implement an actual CLI subcommand registered
 
 For successful transformations, assert the exit status and resulting fixture files. Do not assert informational CLI output as this is less stable. Reserve output assertions for diagnostics on failure paths.
 
+## Install the CLI
+
+Build and install the local CLI globally:
+
+```sh
+pnpm build
+pnpm add -g "file:$PWD"
+sweepy --help
+```
+
 ## Validation
 
 Run these checks before submitting changes:
