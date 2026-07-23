@@ -1,5 +1,6 @@
 {
   "ignore": ["reference/**"],
+  "ignoreDependencies": ["@effect/language-service"],
   "workspaces": {
     ".": {
       "entry": ["tests/**/*.test.ts"],

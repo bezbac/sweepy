@@ -11,7 +11,7 @@
     "format": "oxfmt",
     "format-check": "oxfmt --check",
     "knip": "knip",
-    "prepare": "effect-language-service patch",
+    "prepare": "effect-tsgo patch",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -22,13 +22,13 @@
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.86.6",
+    "@effect/tsgo": "^0.24.2",
     "@effect/vitest": "4.0.0-beta.97",
     "@types/node": "^24.0.0",
     "knip": "^6.29.0",
     "oxfmt": "^0.60.0",
     "rolldown": "^1.2.0",
-    "typescript": "^6.0.0",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.0"
   },
   "engines": {
