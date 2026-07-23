@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 interface ButtonProps {
   className?: string;
   size?: number;
-  variant?: "default" | "primary" | "compact" | "wide";
+  variant?: "default" | "primary" | "compact" | "wide" | "bg-green-500";
   children: ReactNode;
 }
 

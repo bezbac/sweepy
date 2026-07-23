@@ -17,7 +17,7 @@ export default function HomePage() {
       </Button>
       <Button
         variant={isMobile ? "compact" : "wide"}
-        className={isMobile ? isMobile ? "base mobile compact" : "base mobile" : isMobile ? "base desktop compact" : "base desktop"}
+        className={`base ${isMobile ? "mobile" : "desktop"} ${isMobile && "compact"}`}
       >
         Learn More
       </Button>

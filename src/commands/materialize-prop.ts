@@ -11,6 +11,7 @@ import {
   SyntaxKind,
   type TypeAliasDeclaration,
   type TypeLiteralNode,
+  VariableDeclarationKind,
 } from "ts-morph";
 
 import {
@@ -32,7 +33,8 @@ import {
   getOrExtractPropsDeclaration,
 } from "../prop-action";
 
-type FiniteValue = string | number;
+type MaterializedValue = string | number;
+type FiniteValue = MaterializedValue | undefined;
 
 type FiniteExpression =
   | { readonly kind: "value"; readonly value: FiniteValue }
@@ -118,9 +120,48 @@ const unwrapExpression = (expression: Expression): Expression => {
   return expression;
 };
 
-const analyzeExpression = (
+const getSymbolDeclarations = (node: Node) => {
+  let symbol = node.getSymbol();
+  const visited = new Set<NonNullable<typeof symbol>>();
+  while (symbol !== undefined && !visited.has(symbol)) {
+    visited.add(symbol);
+    const aliasedSymbol = symbol.getAliasedSymbol();
+    if (aliasedSymbol === undefined) return symbol.getDeclarations();
+    symbol = aliasedSymbol;
+  }
+  return [];
+};
+
+const analyzeLiteralType = (input: Expression, isClassName: boolean) => {
+  const type = input.getType();
+  const literal = type.getLiteralValue();
+  if (type.isStringLiteral() && typeof literal === "string") {
+    return value(literal);
+  }
+  if (type.isNumberLiteral() && !isClassName && typeof literal === "number") {
+    return value(literal);
+  }
+  if (type.isUndefined()) return value(undefined);
+  return undefined;
+};
+
+const isPropertyWrite = (expression: Expression) => {
+  const parent = expression.getParent();
+  if (Node.isBinaryExpression(parent) && parent.getLeft() === expression) {
+    return true;
+  }
+  return (
+    Node.isPrefixUnaryExpression(parent) ||
+    Node.isPostfixUnaryExpression(parent) ||
+    Node.isDeleteExpression(parent)
+  );
+};
+
+const analyzeExpressionInternal = (
   input: Expression,
   isClassName: boolean,
+  visiting: Set<Node>,
+  constAssertions: Map<Node, Expression>,
 ): FiniteExpression | undefined => {
   const expression = unwrapExpression(input);
 
@@ -135,9 +176,22 @@ const analyzeExpression = (
     return value(expression.getLiteralValue());
   }
 
+  const literalType = analyzeLiteralType(expression, isClassName);
+  if (literalType !== undefined) return literalType;
+
   if (Node.isConditionalExpression(expression)) {
-    const whenTrue = analyzeExpression(expression.getWhenTrue(), isClassName);
-    const whenFalse = analyzeExpression(expression.getWhenFalse(), isClassName);
+    const whenTrue = analyzeExpressionInternal(
+      expression.getWhenTrue(),
+      isClassName,
+      visiting,
+      constAssertions,
+    );
+    const whenFalse = analyzeExpressionInternal(
+      expression.getWhenFalse(),
+      isClassName,
+      visiting,
+      constAssertions,
+    );
     if (whenTrue === undefined || whenFalse === undefined) return undefined;
 
     return {
@@ -154,7 +208,12 @@ const analyzeExpression = (
     expression.getOperatorToken().getKind() ===
       SyntaxKind.AmpersandAmpersandToken
   ) {
-    const whenTrue = analyzeExpression(expression.getRight(), true);
+    const whenTrue = analyzeExpressionInternal(
+      expression.getRight(),
+      true,
+      visiting,
+      constAssertions,
+    );
     if (whenTrue === undefined) return undefined;
 
     return {
@@ -169,7 +228,12 @@ const analyzeExpression = (
     let result: FiniteExpression = value(expression.getHead().getLiteralText());
 
     for (const span of expression.getTemplateSpans()) {
-      const spanExpression = analyzeExpression(span.getExpression(), true);
+      const spanExpression = analyzeExpressionInternal(
+        span.getExpression(),
+        true,
+        visiting,
+        constAssertions,
+      );
       if (spanExpression === undefined) return undefined;
       result = combineStrings(result, spanExpression);
       result = combineStrings(
@@ -184,14 +248,148 @@ const analyzeExpression = (
     });
   }
 
+  if (Node.isIdentifier(expression)) {
+    const declarations = getSymbolDeclarations(expression);
+    if (declarations.length !== 1) return undefined;
+    const declaration = declarations[0]!;
+    if (!Node.isVariableDeclaration(declaration)) return undefined;
+    if (
+      declaration.getVariableStatement()?.getDeclarationKind() !==
+      VariableDeclarationKind.Const
+    ) {
+      return undefined;
+    }
+    const initializer = declaration.getInitializer();
+    if (initializer === undefined || visiting.has(declaration))
+      return undefined;
+
+    visiting.add(declaration);
+    const analyzed = analyzeExpressionInternal(
+      initializer,
+      isClassName,
+      visiting,
+      constAssertions,
+    );
+    visiting.delete(declaration);
+    return analyzed;
+  }
+
+  if (Node.isCallExpression(expression)) {
+    if (expression.getArguments().length !== 0) return undefined;
+    const callee = expression.getExpression();
+    if (!Node.isIdentifier(callee)) return undefined;
+    const declarations = getSymbolDeclarations(callee);
+    if (declarations.length !== 1) return undefined;
+    const declaration = declarations[0]!;
+    if (!Node.isFunctionDeclaration(declaration)) return undefined;
+    if (
+      declaration.getParameters().length !== 0 ||
+      declaration.getReturnTypeNode() !== undefined ||
+      visiting.has(declaration)
+    ) {
+      return undefined;
+    }
+    const body = declaration.getBody();
+    if (body === undefined || !Node.isBlock(body)) return undefined;
+    const statements = body.getStatements();
+    if (statements.length !== 1 || !Node.isReturnStatement(statements[0])) {
+      return undefined;
+    }
+    const returnExpression = statements[0].getExpression();
+    if (returnExpression === undefined) return undefined;
+    const isPrimitiveLiteral =
+      Node.isStringLiteral(returnExpression) ||
+      Node.isNoSubstitutionTemplateLiteral(returnExpression) ||
+      (!isClassName && Node.isNumericLiteral(returnExpression));
+    if (!isPrimitiveLiteral) return undefined;
+
+    const literal = returnExpression.getLiteralValue();
+    visiting.add(declaration);
+    constAssertions.set(declaration, returnExpression);
+    visiting.delete(declaration);
+    return value(literal);
+  }
+
+  if (Node.isPropertyAccessExpression(expression)) {
+    const base = expression.getExpression();
+    if (!Node.isIdentifier(base)) return undefined;
+    const baseDeclarations = getSymbolDeclarations(base);
+    if (baseDeclarations.length !== 1) return undefined;
+    const variableDeclaration = baseDeclarations[0]!;
+    if (!Node.isVariableDeclaration(variableDeclaration)) return undefined;
+    const variableStatement = variableDeclaration.getVariableStatement();
+    if (
+      variableStatement?.getDeclarationKind() !==
+        VariableDeclarationKind.Const ||
+      variableStatement.isExported()
+    ) {
+      return undefined;
+    }
+    const initializer = variableDeclaration.getInitializer();
+    if (initializer === undefined) return undefined;
+    const objectLiteral = unwrapExpression(initializer);
+    if (!Node.isObjectLiteralExpression(objectLiteral)) return undefined;
+
+    const nameNode = variableDeclaration.getNameNode();
+    if (!Node.isIdentifier(nameNode)) return undefined;
+    const references = nameNode.findReferencesAsNodes();
+    const safelyRead = references.every((reference) => {
+      const parent = reference.getParent();
+      return (
+        Node.isPropertyAccessExpression(parent) &&
+        parent.getExpression() === reference &&
+        !isPropertyWrite(parent)
+      );
+    });
+    if (!safelyRead) return undefined;
+
+    const propertyDeclarations = getSymbolDeclarations(
+      expression.getNameNode(),
+    );
+    if (propertyDeclarations.length !== 1) return undefined;
+    const propertyDeclaration = propertyDeclarations[0]!;
+    if (!Node.isPropertyAssignment(propertyDeclaration)) return undefined;
+    if (propertyDeclaration.getParent() !== objectLiteral) return undefined;
+    if (visiting.has(propertyDeclaration)) return undefined;
+
+    visiting.add(propertyDeclaration);
+    const propertyInitializer = propertyDeclaration.getInitializer();
+    if (propertyInitializer === undefined) return undefined;
+    const analyzed = analyzeExpressionInternal(
+      propertyInitializer,
+      isClassName,
+      visiting,
+      constAssertions,
+    );
+    visiting.delete(propertyDeclaration);
+    return analyzed;
+  }
+
   return undefined;
+};
+
+const analyzeExpression = (input: Expression, isClassName: boolean) => {
+  const constAssertions = new Map<Node, Expression>();
+  const analyzed = analyzeExpressionInternal(
+    input,
+    isClassName,
+    new Set(),
+    constAssertions,
+  );
+  if (analyzed === undefined) return undefined;
+
+  for (const returnExpression of constAssertions.values()) {
+    returnExpression.replaceWithText(`${returnExpression.getText()} as const`);
+  }
+  return analyzed;
 };
 
 const collectValues = (
   expression: FiniteExpression,
-  values: Map<string, FiniteValue>,
+  values: Map<string, MaterializedValue>,
 ) => {
   if (expression.kind === "value") {
+    if (expression.value === undefined) return;
     values.set(
       `${typeof expression.value}:${expression.value}`,
       expression.value,
@@ -205,6 +403,7 @@ const collectValues = (
 
 const renderExpression = (expression: FiniteExpression): string => {
   if (expression.kind === "value") {
+    if (expression.value === undefined) return "undefined";
     return typeof expression.value === "string"
       ? JSON.stringify(expression.value)
       : String(expression.value);
@@ -419,7 +618,7 @@ const prepareMaterialization = ({
   );
 
   const isClassName = propName === "className";
-  const discoveredValues = new Map<string, FiniteValue>();
+  const discoveredValues = new Map<string, MaterializedValue>();
   const unsupported: Array<string> = [];
 
   const firstParameter = componentFunction.getParameters()[0];

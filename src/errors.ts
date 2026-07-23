@@ -89,8 +89,8 @@ export class NoSupportedPropValuesError extends Data.TaggedError(
 export class InvalidClassNameFragmentsError extends Data.TaggedError(
   "InvalidClassNameFragmentsError",
 )<{
-  readonly left: string | number;
-  readonly right: string | number;
+  readonly left: string | number | undefined;
+  readonly right: string | number | undefined;
 }> {}
 
 /** A changed file was unexpectedly absent from the in-memory project. */

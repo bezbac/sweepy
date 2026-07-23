@@ -25,7 +25,7 @@ const formatCause = (cause: unknown) => {
   return String(cause);
 };
 
-const formatValue = (value: string | number) =>
+const formatValue = (value: string | number | undefined) =>
   typeof value === "string" ? JSON.stringify(value) : String(value);
 
 const assertUnreachable = (input: never): never => {

@@ -44,6 +44,101 @@ describe("materialize-prop", () => {
     await assertFixtureFiles(projectRoot, "materialize-prop/button-variant");
   });
 
+  it("leaves mutable object properties unsupported", async () => {
+    const projectRoot = await createReferenceProject();
+    const overviewPath = "src/features/dashboard/overview.tsx";
+    const overview = await readProjectFile(projectRoot, overviewPath);
+    await fs.writeFile(
+      path.join(projectRoot, overviewPath),
+      overview.replace(
+        '  overviewButton: "bg-gray-100",\n};',
+        '  overviewButton: "bg-gray-100",\n};\nstyles.overviewButton = "bg-gray-200";',
+      ),
+    );
+
+    const result = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "Button",
+      "--prop",
+      "className",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    const button = await readProjectFile(
+      projectRoot,
+      "src/components/ui/button.tsx",
+    );
+    assert.notInclude(button, '"bg-gray-100"');
+    assert.notInclude(button, '"bg-gray-200"');
+  });
+
+  it("does not narrow helpers with executable statements", async () => {
+    const projectRoot = await createReferenceProject();
+    const planCardPath = "src/features/billing/plan-card.tsx";
+    const planCard = await readProjectFile(projectRoot, planCardPath);
+    await fs.writeFile(
+      path.join(projectRoot, planCardPath),
+      planCard.replace(
+        'function getDynamicClass() {\n  return "text-pro";\n}',
+        'function getDynamicClass() {\n  console.log("resolve class");\n  return "text-pro";\n}',
+      ),
+    );
+
+    const result = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "Button",
+      "--prop",
+      "className",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    const [button, updatedPlanCard] = await Promise.all([
+      readProjectFile(projectRoot, "src/components/ui/button.tsx"),
+      readProjectFile(projectRoot, planCardPath),
+    ]);
+    assert.notInclude(button, '"text-pro"');
+    assert.notInclude(updatedPlanCard, 'return "text-pro" as const;');
+  });
+
+  it("does not edit helpers from an unsupported expression", async () => {
+    const projectRoot = await createReferenceProject();
+    const overviewPath = "src/features/dashboard/overview.tsx";
+    const overview = await readProjectFile(projectRoot, overviewPath);
+    await fs.writeFile(
+      path.join(projectRoot, overviewPath),
+      overview
+        .replace(
+          'function getIconClass() {\n  return "text-blue-500";\n}',
+          'function getIconClass() {\n  return "text-blue-500";\n}\n\nfunction getDeferredClass() {\n  return "deferred-class";\n}',
+        )
+        .replace(
+          '<Button className="flex items-center">Dashboard</Button>',
+          '<Button className="flex items-center">Dashboard</Button>\n      <Button className={`${getDeferredClass()} ${window.location.hash}`}>Unsafe</Button>',
+        ),
+    );
+
+    const result = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "Button",
+      "--prop",
+      "className",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    const [button, updatedOverview] = await Promise.all([
+      readProjectFile(projectRoot, "src/components/ui/button.tsx"),
+      readProjectFile(projectRoot, overviewPath),
+    ]);
+    assert.notInclude(button, '"deferred-class"');
+    assert.notInclude(updatedOverview, 'return "deferred-class" as const;');
+  });
+
   it("materializes Card className and extracts its inline props", async () => {
     const projectRoot = await createReferenceProject();
 

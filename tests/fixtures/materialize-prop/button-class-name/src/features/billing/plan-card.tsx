@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 
 function getDynamicClass() {
-  return "text-pro";
+  return "text-pro" as const;
 }
 
 export function PlanCard({ isPro }: { isPro: boolean }) {
