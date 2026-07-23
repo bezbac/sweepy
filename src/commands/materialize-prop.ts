@@ -28,7 +28,9 @@ type FiniteExpression =
     };
 
 type ComponentFunction =
-  FunctionDeclaration | ArrowFunction | FunctionExpression;
+  | FunctionDeclaration
+  | ArrowFunction
+  | FunctionExpression;
 
 type MaterializePropOptions = {
   readonly repositoryRoot: string;

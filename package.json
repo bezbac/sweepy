@@ -2,14 +2,14 @@
   "name": "sweepy",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "bin": {
     "sweepy": "./dist/cli.js"
   },
+  "type": "module",
   "scripts": {
     "build": "rolldown -c && tsc -p tsconfig.build.json",
-    "format": "prettier --write .",
-    "format-check": "prettier --check .",
+    "format": "oxfmt",
+    "format-check": "oxfmt --check",
     "knip": "knip",
     "prepare": "effect-language-service patch",
     "test": "vitest run",
@@ -26,7 +26,7 @@
     "@effect/vitest": "4.0.0-beta.97",
     "@types/node": "^24.0.0",
     "knip": "^6.29.0",
-    "prettier": "^3.9.0",
+    "oxfmt": "^0.60.0",
     "rolldown": "^1.2.0",
     "typescript": "^6.0.0",
     "vitest": "^4.1.0"
