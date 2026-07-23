@@ -14,7 +14,7 @@ import {
   SyntaxKind,
 } from "ts-morph";
 
-import { confirm } from "../confirm.js";
+import { confirm } from "../confirm";
 
 type FiniteValue = string | number;
 

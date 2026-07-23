@@ -3,7 +3,7 @@ import path from "node:path";
 import { Console, Effect, Schema } from "effect";
 import { type JsxAttribute, Node, SyntaxKind } from "ts-morph";
 
-import { confirm } from "../confirm.js";
+import { confirm } from "../confirm";
 import {
   type PropActionOptions,
   getLocalComponentNames,
@@ -15,7 +15,7 @@ import {
   renderValue,
   selectValue,
   valuesMatch,
-} from "../prop-action.js";
+} from "../prop-action";
 
 type ReplacePropValueOptions = PropActionOptions & {
   readonly sourcePropName: string;

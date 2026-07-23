@@ -7,7 +7,7 @@
     "sweepy": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rolldown -c && tsc -p tsconfig.build.json",
     "format": "prettier --write .",
     "format-check": "prettier --check .",
     "knip": "knip",
@@ -27,6 +27,7 @@
     "@types/node": "^24.0.0",
     "knip": "^6.29.0",
     "prettier": "^3.9.0",
+    "rolldown": "^1.2.0",
     "typescript": "^6.0.0",
     "vitest": "^4.1.0"
   },

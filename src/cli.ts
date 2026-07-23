@@ -6,9 +6,9 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
-import { materializeProp } from "./commands/materialize-prop.js";
-import { liftPropValue } from "./commands/lift-prop-value.js";
-import { replacePropValue } from "./commands/replace-prop-value.js";
+import { materializeProp } from "./commands/materialize-prop";
+import { liftPropValue } from "./commands/lift-prop-value";
+import { replacePropValue } from "./commands/replace-prop-value";
 
 const packageJson = createRequire(import.meta.url)("../package.json") as {
   readonly version: string;
