@@ -23,7 +23,7 @@ type LiftPropValueOptions = PropActionOptions & {
   readonly yes: boolean;
 };
 
-export class LiftPropValueError extends Schema.TaggedErrorClass<LiftPropValueError>(
+class LiftPropValueError extends Schema.TaggedErrorClass<LiftPropValueError>(
   "sweepy/LiftPropValueError",
 )("LiftPropValueError", {
   message: Schema.String,

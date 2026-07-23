@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { promisify } from "node:util";
 
-export const execFileAsync = promisify(execFile);
-export const repositoryRoot = path.resolve(import.meta.dirname, "..");
-export const builtCliPath = path.join(repositoryRoot, "dist/cli.js");
+const execFileAsync = promisify(execFile);
+const repositoryRoot = path.resolve(import.meta.dirname, "..");
+const builtCliPath = path.join(repositoryRoot, "dist/cli.js");
 
 const referenceRoot = path.join(repositoryRoot, "reference");
 const fixturesRoot = path.join(repositoryRoot, "tests/fixtures");

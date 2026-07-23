@@ -41,7 +41,7 @@ type MaterializePropOptions = {
   readonly yes: boolean;
 };
 
-export class MaterializePropError extends Schema.TaggedErrorClass<MaterializePropError>(
+class MaterializePropError extends Schema.TaggedErrorClass<MaterializePropError>(
   "sweepy/MaterializePropError",
 )("MaterializePropError", {
   message: Schema.String,

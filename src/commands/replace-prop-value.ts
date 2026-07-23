@@ -25,7 +25,7 @@ type ReplacePropValueOptions = PropActionOptions & {
   readonly yes: boolean;
 };
 
-export class ReplacePropValueError extends Schema.TaggedErrorClass<ReplacePropValueError>(
+class ReplacePropValueError extends Schema.TaggedErrorClass<ReplacePropValueError>(
   "sweepy/ReplacePropValueError",
 )("ReplacePropValueError", {
   message: Schema.String,

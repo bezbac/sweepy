@@ -14,6 +14,7 @@ Run these checks before submitting changes:
 
 ```sh
 pnpm format
+pnpm knip
 pnpm test
 pnpm typecheck
 pnpm build
