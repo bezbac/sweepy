@@ -1,8 +1,14 @@
 import path from "node:path";
 
-import { Console, Effect, Schema } from "effect";
+import { Console, Effect } from "effect";
 import { type JsxAttribute, Node, SyntaxKind } from "ts-morph";
 
+import {
+  IdenticalSourceAndTargetPropError,
+  preserveSweepyError,
+  PropNotFoundError,
+  PropNotMaterializedError,
+} from "../errors";
 import { executeChanges } from "../execute-changes";
 import {
   type PropActionOptions,
@@ -26,15 +32,11 @@ type ReplacePropValueOptions = PropActionOptions & {
   readonly dryRun: boolean;
 };
 
-class ReplacePropValueError extends Schema.TaggedErrorClass<ReplacePropValueError>(
-  "sweepy/ReplacePropValueError",
-)("ReplacePropValueError", {
-  message: Schema.String,
-}) {}
-
 const prepareReplacement = (options: ReplacePropValueOptions) => {
   if (options.sourcePropName === options.targetPropName) {
-    throw new Error("Source prop and target prop must be different");
+    throw new IdenticalSourceAndTargetPropError({
+      propName: options.sourcePropName,
+    });
   }
 
   const { componentSource, project, properties, sourceFiles } =
@@ -43,30 +45,34 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
     (property) => property.getName() === options.sourcePropName,
   );
   if (sourceProperty === undefined) {
-    throw new Error(
-      `Prop ${options.sourcePropName} not found in ${options.propsTypeName}`,
-    );
+    throw new PropNotFoundError({
+      propName: options.sourcePropName,
+      propsTypeName: options.propsTypeName,
+    });
   }
   const targetProperty = properties.find(
     (property) => property.getName() === options.targetPropName,
   );
   if (targetProperty === undefined) {
-    throw new Error(
-      `Prop ${options.targetPropName} not found in ${options.propsTypeName}`,
-    );
+    throw new PropNotFoundError({
+      propName: options.targetPropName,
+      propsTypeName: options.propsTypeName,
+    });
   }
 
   const sourceValues = getStrictPropValues(sourceProperty);
   if (sourceValues === undefined) {
-    throw new Error(
-      `${options.propsTypeName}.${options.sourcePropName} must be materialized first`,
-    );
+    throw new PropNotMaterializedError({
+      propName: options.sourcePropName,
+      propsTypeName: options.propsTypeName,
+    });
   }
   const targetValues = getStrictPropValues(targetProperty);
   if (targetValues === undefined) {
-    throw new Error(
-      `${options.propsTypeName}.${options.targetPropName} must be materialized first`,
-    );
+    throw new PropNotMaterializedError({
+      propName: options.targetPropName,
+      propsTypeName: options.propsTypeName,
+    });
   }
   const sourceValue = selectValue(
     options.sourceValue,
@@ -183,17 +189,12 @@ const prepareReplacement = (options: ReplacePropValueOptions) => {
   };
 };
 
-const toReplacePropValueError = (cause: unknown) =>
-  new ReplacePropValueError({
-    message: cause instanceof Error ? cause.message : String(cause),
-  });
-
 export const replacePropValue = (options: ReplacePropValueOptions) =>
   Effect.gen(function* () {
     const { changedFiles, project, replacedUsages, unsupported } =
       yield* Effect.try({
         try: () => prepareReplacement(options),
-        catch: toReplacePropValueError,
+        catch: preserveSweepyError,
       });
 
     yield* Console.log(`Replaced ${replacedUsages} usage(s).`);
@@ -213,7 +214,7 @@ export const replacePropValue = (options: ReplacePropValueOptions) =>
       repositoryRoot: options.repositoryRoot,
       yes: options.yes,
       dryRun: options.dryRun,
-    }).pipe(Effect.mapError(toReplacePropValueError));
+    });
     return {
       changedFiles: saved ? changedFiles : [],
       replacedUsages,

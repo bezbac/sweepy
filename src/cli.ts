@@ -3,23 +3,101 @@
 import { createRequire } from "node:module";
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Effect, Option, Schema } from "effect";
+import { Console, Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
 import { liftPropValue } from "./commands/lift-prop-value";
 import { materializeProp } from "./commands/materialize-prop";
 import { narrowProps } from "./commands/narrow-props";
 import { replacePropValue } from "./commands/replace-prop-value";
+import {
+  InvalidWriteModeError,
+  isSweepyError,
+  type SweepyError,
+} from "./errors";
 
 const packageJson = createRequire(import.meta.url)("../package.json") as {
   readonly version: string;
 };
 
-class CliOptionsError extends Schema.TaggedErrorClass<CliOptionsError>(
-  "sweepy/CliOptionsError",
-)("CliOptionsError", {
-  message: Schema.String,
-}) {}
+const formatCause = (cause: unknown) => {
+  if (cause instanceof Error && cause.message.length > 0) return cause.message;
+  return String(cause);
+};
+
+const formatValue = (value: string | number) =>
+  typeof value === "string" ? JSON.stringify(value) : String(value);
+
+const assertUnreachable = (input: never): never => {
+  throw new Error(`Unhandled command error: ${JSON.stringify(input)}`);
+};
+
+const formatCommandError = (error: SweepyError) => {
+  if (error._tag === "ComponentFileNotFoundError") {
+    return `Component file ${JSON.stringify(error.filePath)} was not found.`;
+  }
+  if (error._tag === "ComponentNotFoundError") {
+    return `Component ${JSON.stringify(error.componentName)} was not found under ${JSON.stringify(error.searchRoot)}.`;
+  }
+  if (error._tag === "ComponentNotFoundInFileError") {
+    return `Component ${JSON.stringify(error.componentName)} was not found in ${JSON.stringify(error.filePath)}.`;
+  }
+  if (error._tag === "AmbiguousComponentError") {
+    return `Multiple components named ${JSON.stringify(error.componentName)} were found. Pass --component-file to select one.`;
+  }
+  if (error._tag === "NoSourceFilesError") {
+    return `No TypeScript files were found under ${JSON.stringify(error.searchRoot)}.`;
+  }
+  if (error._tag === "PropNotFoundError") {
+    return `Prop ${JSON.stringify(error.propName)} was not found in ${JSON.stringify(error.propsTypeName)}.`;
+  }
+  if (error._tag === "PropNotMaterializedError") {
+    return `Prop ${JSON.stringify(`${error.propsTypeName}.${error.propName}`)} must be materialized first.`;
+  }
+  if (error._tag === "PropValueNotFoundError") {
+    return `Value ${JSON.stringify(error.input)} is not valid for prop ${JSON.stringify(error.propName)}. Expected one of: ${error.allowedValues.map(formatValue).join(", ")}.`;
+  }
+  if (error._tag === "IdenticalSourceAndTargetPropError") {
+    return `Source and target prop cannot both be ${JSON.stringify(error.propName)}.`;
+  }
+  if (error._tag === "PropsTypeNotFoundError") {
+    return `Props type ${JSON.stringify(error.propsTypeName)} was not found.`;
+  }
+  if (error._tag === "PropsExtractionFailedError") {
+    return `Could not extract props type ${JSON.stringify(error.propsTypeName)} in ${JSON.stringify(error.filePath)}.`;
+  }
+  if (error._tag === "UnsupportedComponentDeclarationError") {
+    return `Component ${JSON.stringify(error.componentName)} uses an unsupported declaration.`;
+  }
+  if (error._tag === "NoSupportedPropValuesError") {
+    return `No supported values were found for ${JSON.stringify(`${error.componentName}.${error.propName}`)}.`;
+  }
+  if (error._tag === "InvalidClassNameFragmentsError") {
+    return `className concatenation requires string fragments, but received ${formatValue(error.left)} and ${formatValue(error.right)}.`;
+  }
+  if (error._tag === "ChangedSourceFileNotFoundError") {
+    return `Could not generate a diff because changed file ${JSON.stringify(error.filePath)} is missing from the project.`;
+  }
+  if (error._tag === "SourceFileReadFailedError") {
+    return `Could not read ${JSON.stringify(error.filePath)} for the diff: ${formatCause(error.cause)}`;
+  }
+  if (error._tag === "DiffGenerationFailedError") {
+    return `Could not generate a diff for ${JSON.stringify(error.filePath)}: ${formatCause(error.cause)}`;
+  }
+  if (error._tag === "ProjectSaveFailedError") {
+    return `Could not save changes: ${formatCause(error.cause)}`;
+  }
+  if (error._tag === "ConfirmationFailedError") {
+    return `Could not read confirmation: ${formatCause(error.cause)}`;
+  }
+  if (error._tag === "InvalidWriteModeError") {
+    return "--yes and --dry-run cannot be used together.";
+  }
+  if (error._tag === "UnexpectedFailureError") {
+    return `Unexpected command failure: ${formatCause(error.cause)}`;
+  }
+  return assertUnreachable(error);
+};
 
 const withWriteModeValidation = <A, E, R>(
   options: { readonly yes: boolean; readonly dryRun: boolean },
@@ -27,8 +105,9 @@ const withWriteModeValidation = <A, E, R>(
 ) =>
   Effect.gen(function* () {
     if (options.yes && options.dryRun) {
-      return yield* new CliOptionsError({
-        message: "--yes and --dry-run cannot be used together",
+      return yield* new InvalidWriteModeError({
+        yes: options.yes,
+        dryRun: options.dryRun,
       });
     }
     return yield* command;
@@ -208,7 +287,13 @@ const rootCommand = Command.make("sweepy").pipe(
   ]),
 );
 
-Command.run(rootCommand, { version: packageJson.version }).pipe(
+const main = Command.run(rootCommand, { version: packageJson.version }).pipe(
+  Effect.tapError((error) =>
+    isSweepyError(error)
+      ? Console.error(formatCommandError(error))
+      : Effect.void,
+  ),
   Effect.provide(NodeServices.layer),
-  NodeRuntime.runMain,
 );
+
+NodeRuntime.runMain(main, { disableErrorReporting: true });

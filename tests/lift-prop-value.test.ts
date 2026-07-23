@@ -82,7 +82,10 @@ describe("lift-prop-value", () => {
     ]);
 
     assert.notStrictEqual(result.exitCode, 0);
-    assert.include(result.stdout, "must be materialized first");
+    assert.include(
+      result.stderr,
+      'Prop "ButtonProps.className" must be materialized first.',
+    );
     assert.strictEqual(await readProjectFile(projectRoot, buttonPath), before);
   });
 

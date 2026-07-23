@@ -153,8 +153,8 @@ describe("materialize-prop", () => {
 
     assert.notStrictEqual(result.exitCode, 0);
     assert.include(
-      `${result.stdout}\n${result.stderr}`,
-      "--yes and --dry-run cannot be used together",
+      result.stderr,
+      "--yes and --dry-run cannot be used together.",
     );
   });
 
@@ -182,7 +182,7 @@ describe("materialize-prop", () => {
     const pagePath = "src/app/page.tsx";
     const before = await readProjectFile(projectRoot, pagePath);
 
-    const { exitCode } = await runCliInProject(projectRoot, [
+    const result = await runCliInProject(projectRoot, [
       "materialize-prop",
       "--component",
       "Missing",
@@ -191,7 +191,11 @@ describe("materialize-prop", () => {
       "--yes",
     ]);
 
-    assert.notStrictEqual(exitCode, 0);
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.include(
+      result.stderr,
+      'Component "Missing" was not found under "src".',
+    );
     assert.strictEqual(await readProjectFile(projectRoot, pagePath), before);
   });
 
@@ -213,7 +217,7 @@ describe("materialize-prop", () => {
     const buttonPath = "src/components/ui/button.tsx";
     const before = await readProjectFile(projectRoot, buttonPath);
 
-    const { exitCode } = await runCliInProject(projectRoot, [
+    const result = await runCliInProject(projectRoot, [
       "materialize-prop",
       "--component",
       "Button",
@@ -222,7 +226,11 @@ describe("materialize-prop", () => {
       "--yes",
     ]);
 
-    assert.notStrictEqual(exitCode, 0);
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.include(
+      result.stderr,
+      'No supported values were found for "Button.missing".',
+    );
     assert.strictEqual(await readProjectFile(projectRoot, buttonPath), before);
   });
 
@@ -230,7 +238,7 @@ describe("materialize-prop", () => {
     const projectRoot = await createReferenceProject();
     await fs.mkdir(path.join(projectRoot, "empty"));
 
-    const { exitCode } = await runCliInProject(projectRoot, [
+    const result = await runCliInProject(projectRoot, [
       "materialize-prop",
       "--component",
       "Button",
@@ -241,7 +249,11 @@ describe("materialize-prop", () => {
       "--yes",
     ]);
 
-    assert.notStrictEqual(exitCode, 0);
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.include(
+      result.stderr,
+      'No TypeScript files were found under "empty".',
+    );
   });
 
   it("loads an explicit component file outside the usage search root", async () => {

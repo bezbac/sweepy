@@ -93,7 +93,10 @@ describe("replace-prop-value", () => {
     ]);
 
     assert.notStrictEqual(result.exitCode, 0);
-    assert.include(result.stdout, "must be materialized first");
+    assert.include(
+      result.stderr,
+      'Prop "ButtonProps.className" must be materialized first.',
+    );
     assert.strictEqual(await readProjectFile(projectRoot, buttonPath), before);
   });
 
@@ -106,7 +109,10 @@ describe("replace-prop-value", () => {
     const second = await runCliInProject(projectRoot, args);
 
     assert.notStrictEqual(second.exitCode, 0);
-    assert.include(second.stdout, "is not in className");
+    assert.include(
+      second.stderr,
+      'Value "h-8 w-8" is not valid for prop "className".',
+    );
     await assertFixtureFiles(
       projectRoot,
       "replace-prop-value/icon-class-name-to-size",

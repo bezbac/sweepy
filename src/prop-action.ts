@@ -17,6 +17,17 @@ import {
   type TypeLiteralNode,
 } from "ts-morph";
 
+import {
+  AmbiguousComponentError,
+  ComponentFileNotFoundError,
+  ComponentNotFoundError,
+  ComponentNotFoundInFileError,
+  NoSourceFilesError,
+  PropsExtractionFailedError,
+  PropsTypeNotFoundError,
+  PropValueNotFoundError,
+} from "./errors";
+
 export type PropValue = string | number;
 
 export type ComponentFunction =
@@ -80,9 +91,11 @@ export const selectValue = (
   );
   if (unquoted.length === 1) return unquoted[0]!;
 
-  throw new Error(
-    `Value ${JSON.stringify(input)} is not in ${propName}: ${values.map(renderValue).join(" | ")}`,
-  );
+  throw new PropValueNotFoundError({
+    input,
+    propName,
+    allowedValues: values,
+  });
 };
 
 const getPropsProperties = (sourceFile: SourceFile, propsTypeName: string) => {
@@ -116,18 +129,22 @@ const findComponentSource = (
   sourceFiles: ReadonlyArray<SourceFile>,
   componentName: string,
   explicitPath: string | undefined,
+  searchRoot: string,
 ) => {
   if (explicitPath !== undefined) {
     const sourceFile = sourceFiles.find(
       (candidate) => path.resolve(candidate.getFilePath()) === explicitPath,
     );
     if (sourceFile === undefined) {
-      throw new Error(`Component file not found: ${explicitPath}`);
+      throw new ComponentFileNotFoundError({
+        filePath: explicitPath,
+      });
     }
     if (!hasComponent(sourceFile, componentName)) {
-      throw new Error(
-        `Component ${componentName} not found in ${sourceFile.getFilePath()}`,
-      );
+      throw new ComponentNotFoundInFileError({
+        componentName,
+        filePath: sourceFile.getFilePath(),
+      });
     }
     return sourceFile;
   }
@@ -136,12 +153,13 @@ const findComponentSource = (
     hasComponent(sourceFile, componentName),
   );
   if (matches.length === 0) {
-    throw new Error(`Component not found: ${componentName}`);
+    throw new ComponentNotFoundError({
+      componentName,
+      searchRoot,
+    });
   }
   if (matches.length > 1) {
-    throw new Error(
-      `Multiple components named ${componentName} found; pass --component-file`,
-    );
+    throw new AmbiguousComponentError({ componentName });
   }
   return matches[0]!;
 };
@@ -173,12 +191,15 @@ export const loadPropActionProject = (options: PropActionOptions) => {
 
   const sourceFiles = project.getSourceFiles();
   if (sourceFiles.length === 0) {
-    throw new Error(`No TypeScript files found under ${options.searchRoot}`);
+    throw new NoSourceFilesError({
+      searchRoot: options.searchRoot,
+    });
   }
   const componentSource = findComponentSource(
     sourceFiles,
     options.componentName,
     absoluteComponentFile,
+    options.searchRoot,
   );
 
   return {
@@ -345,12 +366,18 @@ const insertTypeAliasBeforeComponent = ({
         Node.isStatement(ancestor),
       );
   if (statement === undefined) {
-    throw new Error(`Could not extract inline props for ${propsTypeName}`);
+    throw new PropsExtractionFailedError({
+      propsTypeName,
+      filePath: sourceFile.getFilePath(),
+    });
   }
 
   const statementIndex = sourceFile.getStatements().indexOf(statement);
   if (statementIndex === -1) {
-    throw new Error(`Could not extract inline props for ${propsTypeName}`);
+    throw new PropsExtractionFailedError({
+      propsTypeName,
+      filePath: sourceFile.getFilePath(),
+    });
   }
 
   return sourceFile.insertTypeAlias(statementIndex, {
@@ -399,7 +426,7 @@ export const getOrExtractPropsDeclaration = ({
   const forwardRefPropsType =
     getForwardRefCall(initializer)?.getTypeArguments()[1];
   if (forwardRefPropsType === undefined) {
-    throw new Error(`Props type not found: ${propsTypeName}`);
+    throw new PropsTypeNotFoundError({ propsTypeName });
   }
 
   const extracted = insertTypeAliasBeforeComponent({

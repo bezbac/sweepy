@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { Console, Effect, Schema } from "effect";
+import { Console, Effect } from "effect";
 import {
   type BindingElement,
   type Expression,
@@ -16,6 +16,10 @@ import {
   VariableDeclarationKind,
 } from "ts-morph";
 
+import {
+  preserveSweepyError,
+  UnsupportedComponentDeclarationError,
+} from "../errors";
 import { executeChanges } from "../execute-changes";
 import {
   type ComponentFunction,
@@ -31,12 +35,6 @@ type NarrowPropsOptions = PropActionOptions & {
   readonly yes: boolean;
   readonly dryRun: boolean;
 };
-
-class NarrowPropsError extends Schema.TaggedErrorClass<NarrowPropsError>(
-  "sweepy/NarrowPropsError",
-)("NarrowPropsError", {
-  message: Schema.String,
-}) {}
 
 const unwrapExpression = (expression: Expression): Expression => {
   if (
@@ -620,9 +618,9 @@ const prepareNarrowing = (options: NarrowPropsOptions) => {
     options.componentName,
   );
   if (componentFunction === undefined) {
-    throw new Error(
-      `Unsupported component declaration: ${options.componentName}`,
-    );
+    throw new UnsupportedComponentDeclarationError({
+      componentName: options.componentName,
+    });
   }
 
   const usages = collectUsageNames({
@@ -710,17 +708,12 @@ const prepareNarrowing = (options: NarrowPropsOptions) => {
   };
 };
 
-const toNarrowPropsError = (cause: unknown) =>
-  new NarrowPropsError({
-    message: cause instanceof Error ? cause.message : String(cause),
-  });
-
 export const narrowProps = (options: NarrowPropsOptions) =>
   Effect.gen(function* () {
     const { changedFiles, project, unsupported, usedProps } = yield* Effect.try(
       {
         try: () => prepareNarrowing(options),
-        catch: toNarrowPropsError,
+        catch: preserveSweepyError,
       },
     );
 
@@ -741,7 +734,7 @@ export const narrowProps = (options: NarrowPropsOptions) =>
       repositoryRoot: options.repositoryRoot,
       yes: options.yes,
       dryRun: options.dryRun,
-    }).pipe(Effect.mapError(toNarrowPropsError));
+    });
     return {
       changedFiles: saved ? changedFiles : [],
       unsupported,

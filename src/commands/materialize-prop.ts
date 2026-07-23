@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { Console, Effect, Schema } from "effect";
+import { Console, Effect } from "effect";
 import {
   type Expression,
   type JsxAttribute,
@@ -13,6 +13,17 @@ import {
   type TypeLiteralNode,
 } from "ts-morph";
 
+import {
+  AmbiguousComponentError,
+  ComponentFileNotFoundError,
+  ComponentNotFoundError,
+  ComponentNotFoundInFileError,
+  InvalidClassNameFragmentsError,
+  NoSourceFilesError,
+  NoSupportedPropValuesError,
+  preserveSweepyError,
+  PropNotFoundError,
+} from "../errors";
 import { executeChanges } from "../execute-changes";
 import {
   type ComponentFunction,
@@ -43,12 +54,6 @@ type MaterializePropOptions = {
   readonly yes: boolean;
   readonly dryRun: boolean;
 };
-
-class MaterializePropError extends Schema.TaggedErrorClass<MaterializePropError>(
-  "sweepy/MaterializePropError",
-)("MaterializePropError", {
-  message: Schema.String,
-}) {}
 
 const value = (literal: FiniteValue): FiniteExpression => ({
   kind: "value",
@@ -91,7 +96,10 @@ const combineStrings = (
   }
 
   if (typeof left.value !== "string" || typeof right.value !== "string") {
-    throw new Error("Class name fragments must be strings");
+    throw new InvalidClassNameFragmentsError({
+      left: left.value,
+      right: right.value,
+    });
   }
 
   return value(left.value + right.value);
@@ -209,20 +217,24 @@ const findComponent = (
   sourceFiles: ReadonlyArray<SourceFile>,
   componentName: string,
   explicitPath: string | undefined,
+  searchRoot: string,
 ) => {
   if (explicitPath !== undefined) {
     const sourceFile = sourceFiles.find(
       (candidate) => path.resolve(candidate.getFilePath()) === explicitPath,
     );
     if (sourceFile === undefined) {
-      throw new Error(`Component file not found: ${explicitPath}`);
+      throw new ComponentFileNotFoundError({
+        filePath: explicitPath,
+      });
     }
 
     const componentFunction = getComponentFunction(sourceFile, componentName);
     if (componentFunction === undefined) {
-      throw new Error(
-        `Component ${componentName} not found in ${sourceFile.getFilePath()}`,
-      );
+      throw new ComponentNotFoundInFileError({
+        componentName,
+        filePath: sourceFile.getFilePath(),
+      });
     }
     return { sourceFile, componentFunction };
   }
@@ -235,12 +247,13 @@ const findComponent = (
   });
 
   if (matches.length === 0) {
-    throw new Error(`Component not found: ${componentName}`);
+    throw new ComponentNotFoundError({
+      componentName,
+      searchRoot,
+    });
   }
   if (matches.length > 1) {
-    throw new Error(
-      `Multiple components named ${componentName} found; pass --component-file`,
-    );
+    throw new AmbiguousComponentError({ componentName });
   }
 
   return matches[0]!;
@@ -342,7 +355,7 @@ const rewritePropType = ({
   if (Node.isInterfaceDeclaration(declaration)) {
     const property = declaration.getProperty(propName);
     if (property === undefined) {
-      throw new Error(`Prop ${propName} not found in ${propsTypeName}`);
+      throw new PropNotFoundError({ propName, propsTypeName });
     }
     setPropertyType(property, type);
     return;
@@ -395,13 +408,14 @@ const prepareMaterialization = ({
 
   const sourceFiles = project.getSourceFiles();
   if (sourceFiles.length === 0) {
-    throw new Error(`No TypeScript files found under ${searchRoot}`);
+    throw new NoSourceFilesError({ searchRoot });
   }
 
   const { sourceFile: componentSource, componentFunction } = findComponent(
     sourceFiles,
     componentName,
     absoluteComponentFile,
+    searchRoot,
   );
 
   const isClassName = propName === "className";
@@ -486,9 +500,10 @@ const prepareMaterialization = ({
 
   const values = [...discoveredValues.values()];
   if (values.length === 0) {
-    throw new Error(
-      `No supported values found for ${componentName}.${propName}`,
-    );
+    throw new NoSupportedPropValuesError({
+      componentName,
+      propName,
+    });
   }
 
   const materializedType = values
@@ -518,16 +533,11 @@ const prepareMaterialization = ({
   return { project, changedFiles, unsupported };
 };
 
-const toMaterializePropError = (cause: unknown) =>
-  new MaterializePropError({
-    message: cause instanceof Error ? cause.message : String(cause),
-  });
-
 export const materializeProp = (options: MaterializePropOptions) =>
   Effect.gen(function* () {
     const { changedFiles, project, unsupported } = yield* Effect.try({
       try: () => prepareMaterialization(options),
-      catch: toMaterializePropError,
+      catch: preserveSweepyError,
     });
 
     if (unsupported.length > 0) {
@@ -547,6 +557,6 @@ export const materializeProp = (options: MaterializePropOptions) =>
       repositoryRoot: options.repositoryRoot,
       yes: options.yes,
       dryRun: options.dryRun,
-    }).pipe(Effect.mapError(toMaterializePropError));
+    });
     return { changedFiles: saved ? changedFiles : [], unsupported };
   });

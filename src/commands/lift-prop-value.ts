@@ -1,8 +1,13 @@
 import path from "node:path";
 
-import { Console, Effect, Schema } from "effect";
+import { Console, Effect } from "effect";
 import { type JsxAttribute, Node, SyntaxKind } from "ts-morph";
 
+import {
+  preserveSweepyError,
+  PropNotFoundError,
+  PropNotMaterializedError,
+} from "../errors";
 import { executeChanges } from "../execute-changes";
 import {
   type PropActionOptions,
@@ -24,12 +29,6 @@ type LiftPropValueOptions = PropActionOptions & {
   readonly dryRun: boolean;
 };
 
-class LiftPropValueError extends Schema.TaggedErrorClass<LiftPropValueError>(
-  "sweepy/LiftPropValueError",
-)("LiftPropValueError", {
-  message: Schema.String,
-}) {}
-
 const prepareLift = (options: LiftPropValueOptions) => {
   const { componentSource, project, properties, sourceFiles } =
     loadPropActionProject(options);
@@ -37,16 +36,18 @@ const prepareLift = (options: LiftPropValueOptions) => {
     (property) => property.getName() === options.sourcePropName,
   );
   if (sourceProperty === undefined) {
-    throw new Error(
-      `Prop ${options.sourcePropName} not found in ${options.propsTypeName}`,
-    );
+    throw new PropNotFoundError({
+      propName: options.sourcePropName,
+      propsTypeName: options.propsTypeName,
+    });
   }
 
   const sourceValues = getStrictPropValues(sourceProperty);
   if (sourceValues === undefined) {
-    throw new Error(
-      `${options.propsTypeName}.${options.sourcePropName} must be materialized first`,
-    );
+    throw new PropNotMaterializedError({
+      propName: options.sourcePropName,
+      propsTypeName: options.propsTypeName,
+    });
   }
   const sourceValue = selectValue(
     options.sourceValue,
@@ -153,17 +154,12 @@ const prepareLift = (options: LiftPropValueOptions) => {
   };
 };
 
-const toLiftPropValueError = (cause: unknown) =>
-  new LiftPropValueError({
-    message: cause instanceof Error ? cause.message : String(cause),
-  });
-
 export const liftPropValue = (options: LiftPropValueOptions) =>
   Effect.gen(function* () {
     const { changedFiles, liftedUsages, project, unsupported } =
       yield* Effect.try({
         try: () => prepareLift(options),
-        catch: toLiftPropValueError,
+        catch: preserveSweepyError,
       });
 
     yield* Console.log(`Lifted ${liftedUsages} usage(s).`);
@@ -183,7 +179,7 @@ export const liftPropValue = (options: LiftPropValueOptions) =>
       repositoryRoot: options.repositoryRoot,
       yes: options.yes,
       dryRun: options.dryRun,
-    }).pipe(Effect.mapError(toLiftPropValueError));
+    });
     return {
       changedFiles: saved ? changedFiles : [],
       liftedUsages,
