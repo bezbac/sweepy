@@ -3,7 +3,6 @@ import path from "node:path";
 
 import { createTwoFilesPatch } from "diff";
 import { Console, Effect } from "effect";
-import type { Project } from "ts-morph";
 
 import { confirm } from "./confirm";
 import {
@@ -14,6 +13,7 @@ import {
   ProjectSaveFailedError,
   SourceFileReadFailedError,
 } from "./errors";
+import { TsMorphProject } from "./ts-morph-project";
 
 const colorizeDiff = (diff: string) => {
   if (
@@ -36,19 +36,18 @@ const colorizeDiff = (diff: string) => {
 };
 
 export const executeChanges = ({
-  project,
   changedFiles,
   repositoryRoot,
   yes,
   dryRun,
 }: {
-  readonly project: Project;
   readonly changedFiles: ReadonlyArray<string>;
   readonly repositoryRoot: string;
   readonly yes: boolean;
   readonly dryRun: boolean;
 }) =>
   Effect.gen(function* () {
+    const project = yield* TsMorphProject;
     if (dryRun) {
       const patches = yield* Effect.tryPromise({
         try: () =>

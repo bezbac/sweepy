@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createRequire } from "node:module";
+import path from "node:path";
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option } from "effect";
@@ -15,6 +16,7 @@ import {
   isSweepyError,
   type SweepyError,
 } from "./errors";
+import { TsMorphProject } from "./ts-morph-project";
 import { formatUnsupportedCases } from "./unsupported-case";
 
 const packageJson = createRequire(import.meta.url)("../package.json") as {
@@ -116,6 +118,19 @@ const withWriteModeValidation = <A, E, R>(
     return yield* command;
   });
 
+const withTsMorphProject = <A, E, R>(
+  tsconfigPath: string,
+  command: Effect.Effect<A, E, R | TsMorphProject>,
+) =>
+  command.pipe(
+    Effect.provide(
+      TsMorphProject.layer({
+        tsConfigFilePath: path.resolve(process.cwd(), tsconfigPath),
+        skipAddingFilesFromTsConfig: true,
+      }),
+    ),
+  );
+
 const globalFlags = {
   component: Flag.string("component").pipe(
     Flag.withDefault("Button"),
@@ -157,22 +172,25 @@ const materializePropCommand = Command.make(
     prop: Flag.string("prop").pipe(Flag.withDescription("Prop to materialize")),
   },
   (options) =>
-    withWriteModeValidation(
-      options,
-      materializeProp({
-        repositoryRoot: process.cwd(),
-        componentName: options.component,
-        propsTypeName: Option.getOrElse(
-          options.propsType,
-          () => `${options.component}Props`,
-        ),
-        searchRoot: options.searchRoot,
-        tsconfigPath: options.tsconfig,
-        componentFile: Option.getOrUndefined(options.componentFile),
-        propName: options.prop,
-        yes: options.yes,
-        dryRun: options.dryRun,
-      }),
+    withTsMorphProject(
+      options.tsconfig,
+      withWriteModeValidation(
+        options,
+        materializeProp({
+          repositoryRoot: process.cwd(),
+          componentName: options.component,
+          propsTypeName: Option.getOrElse(
+            options.propsType,
+            () => `${options.component}Props`,
+          ),
+          searchRoot: options.searchRoot,
+          tsconfigPath: options.tsconfig,
+          componentFile: Option.getOrUndefined(options.componentFile),
+          propName: options.prop,
+          yes: options.yes,
+          dryRun: options.dryRun,
+        }),
+      ),
     ),
 ).pipe(
   Command.withDescription(
@@ -198,25 +216,28 @@ const replacePropValueCommand = Command.make(
     ),
   },
   (options) =>
-    withWriteModeValidation(
-      options,
-      replacePropValue({
-        repositoryRoot: process.cwd(),
-        componentName: options.component,
-        propsTypeName: Option.getOrElse(
-          options.propsType,
-          () => `${options.component}Props`,
-        ),
-        searchRoot: options.searchRoot,
-        tsconfigPath: options.tsconfig,
-        componentFile: Option.getOrUndefined(options.componentFile),
-        sourcePropName: options.sourceProp,
-        sourceValue: options.sourceValue,
-        targetPropName: options.targetProp,
-        targetValue: options.targetValue,
-        yes: options.yes,
-        dryRun: options.dryRun,
-      }),
+    withTsMorphProject(
+      options.tsconfig,
+      withWriteModeValidation(
+        options,
+        replacePropValue({
+          repositoryRoot: process.cwd(),
+          componentName: options.component,
+          propsTypeName: Option.getOrElse(
+            options.propsType,
+            () => `${options.component}Props`,
+          ),
+          searchRoot: options.searchRoot,
+          tsconfigPath: options.tsconfig,
+          componentFile: Option.getOrUndefined(options.componentFile),
+          sourcePropName: options.sourceProp,
+          sourceValue: options.sourceValue,
+          targetPropName: options.targetProp,
+          targetValue: options.targetValue,
+          yes: options.yes,
+          dryRun: options.dryRun,
+        }),
+      ),
     ),
 ).pipe(Command.withDescription("Replace one static component prop value"));
 
@@ -236,24 +257,27 @@ const liftPropValueCommand = Command.make(
     ),
   },
   (options) =>
-    withWriteModeValidation(
-      options,
-      liftPropValue({
-        repositoryRoot: process.cwd(),
-        componentName: options.component,
-        propsTypeName: Option.getOrElse(
-          options.propsType,
-          () => `${options.component}Props`,
-        ),
-        searchRoot: options.searchRoot,
-        tsconfigPath: options.tsconfig,
-        componentFile: Option.getOrUndefined(options.componentFile),
-        sourcePropName: options.sourceProp,
-        sourceValue: options.sourceValue,
-        wrapperName: options.wrapper,
-        yes: options.yes,
-        dryRun: options.dryRun,
-      }),
+    withTsMorphProject(
+      options.tsconfig,
+      withWriteModeValidation(
+        options,
+        liftPropValue({
+          repositoryRoot: process.cwd(),
+          componentName: options.component,
+          propsTypeName: Option.getOrElse(
+            options.propsType,
+            () => `${options.component}Props`,
+          ),
+          searchRoot: options.searchRoot,
+          tsconfigPath: options.tsconfig,
+          componentFile: Option.getOrUndefined(options.componentFile),
+          sourcePropName: options.sourceProp,
+          sourceValue: options.sourceValue,
+          wrapperName: options.wrapper,
+          yes: options.yes,
+          dryRun: options.dryRun,
+        }),
+      ),
     ),
 ).pipe(Command.withDescription("Lift one static prop value to a wrapper"));
 
@@ -263,21 +287,24 @@ const narrowPropsCommand = Command.make(
     ...globalFlags,
   },
   (options) =>
-    withWriteModeValidation(
-      options,
-      narrowProps({
-        repositoryRoot: process.cwd(),
-        componentName: options.component,
-        propsTypeName: Option.getOrElse(
-          options.propsType,
-          () => `${options.component}Props`,
-        ),
-        searchRoot: options.searchRoot,
-        tsconfigPath: options.tsconfig,
-        componentFile: Option.getOrUndefined(options.componentFile),
-        yes: options.yes,
-        dryRun: options.dryRun,
-      }),
+    withTsMorphProject(
+      options.tsconfig,
+      withWriteModeValidation(
+        options,
+        narrowProps({
+          repositoryRoot: process.cwd(),
+          componentName: options.component,
+          propsTypeName: Option.getOrElse(
+            options.propsType,
+            () => `${options.component}Props`,
+          ),
+          searchRoot: options.searchRoot,
+          tsconfigPath: options.tsconfig,
+          componentFile: Option.getOrUndefined(options.componentFile),
+          yes: options.yes,
+          dryRun: options.dryRun,
+        }),
+      ),
     ),
 ).pipe(Command.withDescription("Narrow component props to their used keys"));
 

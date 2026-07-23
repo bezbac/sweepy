@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { Effect } from "effect";
 import {
   type ArrowFunction,
   type CallExpression,
@@ -9,7 +10,6 @@ import {
   type InterfaceDeclaration,
   type JsxAttribute,
   Node,
-  Project,
   type PropertySignature,
   type Symbol as MorphSymbol,
   type SourceFile,
@@ -23,10 +23,12 @@ import {
   ComponentNotFoundError,
   ComponentNotFoundInFileError,
   NoSourceFilesError,
+  preserveSweepyError,
   PropsExtractionFailedError,
   PropsTypeNotFoundError,
   PropValueNotFoundError,
 } from "./errors";
+import { TsMorphProject } from "./ts-morph-project";
 
 export type PropValue = string | number;
 
@@ -164,51 +166,85 @@ const findComponentSource = (
   return matches[0]!;
 };
 
-export const loadPropActionProject = (options: PropActionOptions) => {
-  const project = new Project({
-    tsConfigFilePath: path.resolve(
-      options.repositoryRoot,
-      options.tsconfigPath,
-    ),
-    skipAddingFilesFromTsConfig: true,
-  });
-  const absoluteSearchRoot = path.resolve(
-    options.repositoryRoot,
-    options.searchRoot,
-  );
-  project.addSourceFilesAtPaths([
-    path.join(absoluteSearchRoot, "**/*.ts"),
-    path.join(absoluteSearchRoot, "**/*.tsx"),
-  ]);
+export const loadPropActionProject = (options: PropActionOptions) =>
+  Effect.gen(function* () {
+    const project = yield* TsMorphProject;
+    return yield* Effect.try({
+      try: () => {
+        const absoluteSearchRoot = path.resolve(
+          options.repositoryRoot,
+          options.searchRoot,
+        );
+        project.addSourceFilesAtPaths([
+          path.join(absoluteSearchRoot, "**/*.ts"),
+          path.join(absoluteSearchRoot, "**/*.tsx"),
+        ]);
 
-  const absoluteComponentFile =
-    options.componentFile === undefined
-      ? undefined
-      : path.resolve(options.repositoryRoot, options.componentFile);
-  if (absoluteComponentFile !== undefined) {
-    project.addSourceFileAtPathIfExists(absoluteComponentFile);
-  }
+        const absoluteComponentFile =
+          options.componentFile === undefined
+            ? undefined
+            : path.resolve(options.repositoryRoot, options.componentFile);
+        if (absoluteComponentFile !== undefined) {
+          project.addSourceFileAtPathIfExists(absoluteComponentFile);
+        }
 
-  const sourceFiles = project.getSourceFiles();
-  if (sourceFiles.length === 0) {
-    throw new NoSourceFilesError({
-      searchRoot: options.searchRoot,
+        const sourceFiles = project.getSourceFiles();
+        if (sourceFiles.length === 0) {
+          throw new NoSourceFilesError({
+            searchRoot: options.searchRoot,
+          });
+        }
+        const componentSource = findComponentSource(
+          sourceFiles,
+          options.componentName,
+          absoluteComponentFile,
+          options.searchRoot,
+        );
+
+        return {
+          componentSource,
+          properties: getPropsProperties(
+            componentSource,
+            options.propsTypeName,
+          ),
+          sourceFiles,
+        };
+      },
+      catch: preserveSweepyError,
     });
-  }
-  const componentSource = findComponentSource(
-    sourceFiles,
-    options.componentName,
-    absoluteComponentFile,
-    options.searchRoot,
-  );
+  });
 
-  return {
-    componentSource,
-    project,
-    properties: getPropsProperties(componentSource, options.propsTypeName),
-    sourceFiles,
-  };
-};
+export const formatAndGetChangedFiles = (repositoryRoot: string) =>
+  Effect.gen(function* () {
+    const project = yield* TsMorphProject;
+    return yield* Effect.try({
+      try: () => {
+        for (const sourceFile of project.getSourceFiles()) {
+          if (sourceFile.isSaved()) continue;
+          sourceFile.formatText({ indentSize: 2 });
+        }
+
+        return project
+          .getSourceFiles()
+          .filter((sourceFile) => !sourceFile.isSaved())
+          .map((sourceFile) =>
+            path.relative(repositoryRoot, sourceFile.getFilePath()),
+          );
+      },
+      catch: preserveSweepyError,
+    });
+  });
+
+export const getChangedFiles = (repositoryRoot: string) =>
+  Effect.gen(function* () {
+    const project = yield* TsMorphProject;
+    return project
+      .getSourceFiles()
+      .filter((sourceFile) => !sourceFile.isSaved())
+      .map((sourceFile) =>
+        path.relative(repositoryRoot, sourceFile.getFilePath()),
+      );
+  });
 
 export const getLocalComponentNames = (
   sourceFile: SourceFile,

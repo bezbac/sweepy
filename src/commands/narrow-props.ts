@@ -26,6 +26,7 @@ import {
   type PropActionOptions,
   getComponentFunction,
   getForwardRefCall,
+  getChangedFiles,
   getLocalComponentNames,
   getOrExtractPropsDeclaration,
   loadPropActionProject,
@@ -627,132 +628,133 @@ const narrowInterface = (
   return before !== declaration.getText();
 };
 
-const prepareNarrowing = (options: NarrowPropsOptions) => {
-  const { componentSource, project, sourceFiles } =
-    loadPropActionProject(options);
-  const componentFunction = getComponentFunction(
-    componentSource,
-    options.componentName,
-  );
-  if (componentFunction === undefined) {
-    throw new UnsupportedComponentDeclarationError({
-      componentName: options.componentName,
-    });
-  }
+const prepareNarrowing = (options: NarrowPropsOptions) =>
+  Effect.gen(function* () {
+    const { componentSource, sourceFiles } =
+      yield* loadPropActionProject(options);
+    const prepared = yield* Effect.try({
+      try: () => {
+        const componentFunction = getComponentFunction(
+          componentSource,
+          options.componentName,
+        );
+        if (componentFunction === undefined) {
+          throw new UnsupportedComponentDeclarationError({
+            componentName: options.componentName,
+          });
+        }
 
-  const usages = collectUsageNames({
-    sourceFiles,
-    componentSource,
-    componentName: options.componentName,
-    repositoryRoot: options.repositoryRoot,
-  });
-  const internal = collectInternalNames(componentFunction);
-  const unsupported = [...usages.unsupported];
-  const usedNames = new Set([...usages.names, ...internal.names]);
-  if (internal.ambiguous) {
-    unsupported.push({
-      kind: "component",
-      filePath: path.relative(
-        options.repositoryRoot,
-        componentSource.getFilePath(),
-      ),
-      reason: { kind: "component-props-not-static" },
+        const usages = collectUsageNames({
+          sourceFiles,
+          componentSource,
+          componentName: options.componentName,
+          repositoryRoot: options.repositoryRoot,
+        });
+        const internal = collectInternalNames(componentFunction);
+        const unsupported = [...usages.unsupported];
+        const usedNames = new Set([...usages.names, ...internal.names]);
+        if (internal.ambiguous) {
+          unsupported.push({
+            kind: "component",
+            filePath: path.relative(
+              options.repositoryRoot,
+              componentSource.getFilePath(),
+            ),
+            reason: { kind: "component-props-not-static" },
+          });
+        }
+        const propsReason = getUnsupportedPropsReason(
+          getOriginalPropsSource({
+            sourceFile: componentSource,
+            componentFunction,
+            componentName: options.componentName,
+            propsTypeName: options.propsTypeName,
+          }),
+        );
+        if (propsReason !== undefined) {
+          unsupported.push({
+            kind: "component",
+            filePath: path.relative(
+              options.repositoryRoot,
+              componentSource.getFilePath(),
+            ),
+            reason: propsReason,
+          });
+        }
+        const sharedReason = getSharedDeclarationReason({
+          sourceFile: componentSource,
+          componentFunction,
+          componentName: options.componentName,
+          propsTypeName: options.propsTypeName,
+        });
+        if (sharedReason !== undefined) {
+          unsupported.push({
+            kind: "component",
+            filePath: path.relative(
+              options.repositoryRoot,
+              componentSource.getFilePath(),
+            ),
+            reason: sharedReason,
+          });
+        }
+        const componentEscapeReason = getComponentEscapeReason(
+          componentSource,
+          options.componentName,
+        );
+        if (componentEscapeReason !== undefined) {
+          unsupported.push({
+            kind: "component",
+            filePath: path.relative(
+              options.repositoryRoot,
+              componentSource.getFilePath(),
+            ),
+            reason: componentEscapeReason,
+          });
+        }
+        if (unsupported.length > 0) {
+          return {
+            collectChangedFiles: false as const,
+            unsupported,
+            usedProps: [...usedNames].sort(),
+          };
+        }
+
+        const declaration = getOrExtractPropsDeclaration({
+          sourceFile: componentSource,
+          componentFunction,
+          componentName: options.componentName,
+          propsTypeName: options.propsTypeName,
+        });
+        const narrowed = Node.isTypeAliasDeclaration(declaration)
+          ? narrowTypeAlias(declaration, usedNames)
+          : narrowInterface(declaration, usedNames);
+
+        if (narrowed || !componentSource.isSaved()) {
+          componentSource.formatText({ indentSize: 2 });
+        }
+        return {
+          collectChangedFiles: true as const,
+          unsupported,
+          usedProps: [...usedNames].sort(),
+          yes: options.yes,
+        };
+      },
+      catch: preserveSweepyError,
     });
-  }
-  const propsReason = getUnsupportedPropsReason(
-    getOriginalPropsSource({
-      sourceFile: componentSource,
-      componentFunction,
-      componentName: options.componentName,
-      propsTypeName: options.propsTypeName,
-    }),
-  );
-  if (propsReason !== undefined) {
-    unsupported.push({
-      kind: "component",
-      filePath: path.relative(
-        options.repositoryRoot,
-        componentSource.getFilePath(),
-      ),
-      reason: propsReason,
-    });
-  }
-  const sharedReason = getSharedDeclarationReason({
-    sourceFile: componentSource,
-    componentFunction,
-    componentName: options.componentName,
-    propsTypeName: options.propsTypeName,
-  });
-  if (sharedReason !== undefined) {
-    unsupported.push({
-      kind: "component",
-      filePath: path.relative(
-        options.repositoryRoot,
-        componentSource.getFilePath(),
-      ),
-      reason: sharedReason,
-    });
-  }
-  const componentEscapeReason = getComponentEscapeReason(
-    componentSource,
-    options.componentName,
-  );
-  if (componentEscapeReason !== undefined) {
-    unsupported.push({
-      kind: "component",
-      filePath: path.relative(
-        options.repositoryRoot,
-        componentSource.getFilePath(),
-      ),
-      reason: componentEscapeReason,
-    });
-  }
-  if (unsupported.length > 0) {
+    const changedFiles = prepared.collectChangedFiles
+      ? yield* getChangedFiles(options.repositoryRoot)
+      : [];
     return {
-      changedFiles: [] as Array<string>,
-      project,
-      unsupported,
-      usedProps: [...usedNames].sort(),
+      changedFiles,
+      unsupported: prepared.unsupported,
+      usedProps: prepared.usedProps,
     };
-  }
-
-  const declaration = getOrExtractPropsDeclaration({
-    sourceFile: componentSource,
-    componentFunction,
-    componentName: options.componentName,
-    propsTypeName: options.propsTypeName,
   });
-  const narrowed = Node.isTypeAliasDeclaration(declaration)
-    ? narrowTypeAlias(declaration, usedNames)
-    : narrowInterface(declaration, usedNames);
-
-  if (narrowed || !componentSource.isSaved()) {
-    componentSource.formatText({ indentSize: 2 });
-  }
-  const changedFiles = project
-    .getSourceFiles()
-    .filter((sourceFile) => !sourceFile.isSaved())
-    .map((sourceFile) =>
-      path.relative(options.repositoryRoot, sourceFile.getFilePath()),
-    );
-
-  return {
-    changedFiles,
-    project,
-    unsupported,
-    usedProps: [...usedNames].sort(),
-    yes: options.yes,
-  };
-};
 
 export const narrowProps = (options: NarrowPropsOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, project, unsupported, usedProps } = yield* Effect.try(
-      {
-        try: () => prepareNarrowing(options),
-        catch: preserveSweepyError,
-      },
-    );
+    const { changedFiles, unsupported, usedProps } =
+      yield* prepareNarrowing(options);
 
     if (unsupported.length > 0) {
       yield* Console.log(
@@ -766,7 +768,6 @@ export const narrowProps = (options: NarrowPropsOptions) =>
 
     yield* Console.log(`Used props: ${usedProps.join(", ") || "none"}`);
     const saved = yield* executeChanges({
-      project,
       changedFiles,
       repositoryRoot: options.repositoryRoot,
       yes: options.yes,

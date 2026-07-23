@@ -11,6 +11,7 @@ import {
 import { executeChanges } from "../execute-changes";
 import {
   type PropActionOptions,
+  formatAndGetChangedFiles,
   getLocalComponentNames,
   getStaticAttributeValue,
   getStrictPropValues,
@@ -33,155 +34,154 @@ type LiftPropValueOptions = PropActionOptions & {
   readonly dryRun: boolean;
 };
 
-const prepareLift = (options: LiftPropValueOptions) => {
-  const { componentSource, project, properties, sourceFiles } =
-    loadPropActionProject(options);
-  const sourceProperty = properties.find(
-    (property) => property.getName() === options.sourcePropName,
-  );
-  if (sourceProperty === undefined) {
-    throw new PropNotFoundError({
-      propName: options.sourcePropName,
-      propsTypeName: options.propsTypeName,
-    });
-  }
-
-  const sourceValues = getStrictPropValues(sourceProperty);
-  if (sourceValues === undefined) {
-    throw new PropNotMaterializedError({
-      propName: options.sourcePropName,
-      propsTypeName: options.propsTypeName,
-    });
-  }
-  const sourceValue = selectValue(
-    options.sourceValue,
-    sourceValues,
-    options.sourcePropName,
-  );
-
-  const unsupported: Array<UnsupportedCase> = [];
-  let liftedUsages = 0;
-
-  for (const sourceFile of sourceFiles) {
-    const localComponentNames = getLocalComponentNames(
-      sourceFile,
-      componentSource,
-      options.componentName,
-    );
-    if (localComponentNames.size === 0) continue;
-
-    const openingElements = [
-      ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
-      ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement),
-    ].sort((left, right) => right.getStart() - left.getStart());
-
-    for (const element of openingElements) {
-      if (
-        element.wasForgotten() ||
-        !localComponentNames.has(element.getTagNameNode().getText())
-      ) {
-        continue;
-      }
-      const sourceAttribute = element
-        .getAttributes()
-        .find(
-          (candidate): candidate is JsxAttribute =>
-            Node.isJsxAttribute(candidate) &&
-            candidate.getNameNode().getText() === options.sourcePropName,
+const prepareLift = (options: LiftPropValueOptions) =>
+  Effect.gen(function* () {
+    const { componentSource, properties, sourceFiles } =
+      yield* loadPropActionProject(options);
+    const { liftedUsages, unsupported } = yield* Effect.try({
+      try: () => {
+        const sourceProperty = properties.find(
+          (property) => property.getName() === options.sourcePropName,
         );
-      if (sourceAttribute === undefined) continue;
+        if (sourceProperty === undefined) {
+          throw new PropNotFoundError({
+            propName: options.sourcePropName,
+            propsTypeName: options.propsTypeName,
+          });
+        }
 
-      const actualSourceValue = getStaticAttributeValue(sourceAttribute);
-      if (actualSourceValue === undefined) {
-        unsupported.push({
-          kind: "usage",
-          filePath: path.relative(
-            options.repositoryRoot,
-            sourceFile.getFilePath(),
-          ),
-          lineNumber: sourceAttribute.getStartLineNumber(),
-          source: sourceAttribute.getText(),
-          reason: { kind: "prop-value-not-static" },
-        });
-        continue;
-      }
-      if (
-        !valuesMatch(options.sourcePropName, actualSourceValue, sourceValue)
-      ) {
-        continue;
-      }
-
-      sourceAttribute.remove();
-      const wrapperAttribute = `${options.sourcePropName}=${renderInitializer(sourceValue)}`;
-
-      if (Node.isJsxSelfClosingElement(element)) {
-        const componentText = element.getText();
-        element.replaceWithText(
-          `<${options.wrapperName} ${wrapperAttribute}>${componentText}</${options.wrapperName}>`,
+        const sourceValues = getStrictPropValues(sourceProperty);
+        if (sourceValues === undefined) {
+          throw new PropNotMaterializedError({
+            propName: options.sourcePropName,
+            propsTypeName: options.propsTypeName,
+          });
+        }
+        const sourceValue = selectValue(
+          options.sourceValue,
+          sourceValues,
+          options.sourcePropName,
         );
-        liftedUsages += 1;
-        continue;
-      }
 
-      const jsxElement = element.getParent();
-      if (!Node.isJsxElement(jsxElement)) {
-        unsupported.push({
-          kind: "usage",
-          filePath: path.relative(
-            options.repositoryRoot,
-            sourceFile.getFilePath(),
-          ),
-          lineNumber: element.getStartLineNumber(),
-          source: element.getText(),
-          reason: {
-            kind: "jsx-element-not-found",
-            componentName: options.componentName,
-          },
-        });
-        continue;
-      }
-      const componentText = jsxElement.getText();
-      jsxElement.replaceWithText(
-        `<${options.wrapperName} ${wrapperAttribute}>${componentText}</${options.wrapperName}>`,
-      );
-      liftedUsages += 1;
-    }
-  }
+        const unsupported: Array<UnsupportedCase> = [];
+        let liftedUsages = 0;
 
-  removePropValue(
-    sourceProperty,
-    options.sourcePropName,
-    sourceValues,
-    sourceValue,
-  );
+        for (const sourceFile of sourceFiles) {
+          const localComponentNames = getLocalComponentNames(
+            sourceFile,
+            componentSource,
+            options.componentName,
+          );
+          if (localComponentNames.size === 0) continue;
 
-  for (const sourceFile of project.getSourceFiles()) {
-    if (sourceFile.isSaved()) continue;
-    sourceFile.formatText({ indentSize: 2 });
-  }
+          const openingElements = [
+            ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
+            ...sourceFile.getDescendantsOfKind(
+              SyntaxKind.JsxSelfClosingElement,
+            ),
+          ].sort((left, right) => right.getStart() - left.getStart());
 
-  const changedFiles = project
-    .getSourceFiles()
-    .filter((sourceFile) => !sourceFile.isSaved())
-    .map((sourceFile) =>
-      path.relative(options.repositoryRoot, sourceFile.getFilePath()),
+          for (const element of openingElements) {
+            if (
+              element.wasForgotten() ||
+              !localComponentNames.has(element.getTagNameNode().getText())
+            ) {
+              continue;
+            }
+            const sourceAttribute = element
+              .getAttributes()
+              .find(
+                (candidate): candidate is JsxAttribute =>
+                  Node.isJsxAttribute(candidate) &&
+                  candidate.getNameNode().getText() === options.sourcePropName,
+              );
+            if (sourceAttribute === undefined) continue;
+
+            const actualSourceValue = getStaticAttributeValue(sourceAttribute);
+            if (actualSourceValue === undefined) {
+              unsupported.push({
+                kind: "usage",
+                filePath: path.relative(
+                  options.repositoryRoot,
+                  sourceFile.getFilePath(),
+                ),
+                lineNumber: sourceAttribute.getStartLineNumber(),
+                source: sourceAttribute.getText(),
+                reason: { kind: "prop-value-not-static" },
+              });
+              continue;
+            }
+            if (
+              !valuesMatch(
+                options.sourcePropName,
+                actualSourceValue,
+                sourceValue,
+              )
+            ) {
+              continue;
+            }
+
+            sourceAttribute.remove();
+            const wrapperAttribute = `${options.sourcePropName}=${renderInitializer(sourceValue)}`;
+
+            if (Node.isJsxSelfClosingElement(element)) {
+              const componentText = element.getText();
+              element.replaceWithText(
+                `<${options.wrapperName} ${wrapperAttribute}>${componentText}</${options.wrapperName}>`,
+              );
+              liftedUsages += 1;
+              continue;
+            }
+
+            const jsxElement = element.getParent();
+            if (!Node.isJsxElement(jsxElement)) {
+              unsupported.push({
+                kind: "usage",
+                filePath: path.relative(
+                  options.repositoryRoot,
+                  sourceFile.getFilePath(),
+                ),
+                lineNumber: element.getStartLineNumber(),
+                source: element.getText(),
+                reason: {
+                  kind: "jsx-element-not-found",
+                  componentName: options.componentName,
+                },
+              });
+              continue;
+            }
+            const componentText = jsxElement.getText();
+            jsxElement.replaceWithText(
+              `<${options.wrapperName} ${wrapperAttribute}>${componentText}</${options.wrapperName}>`,
+            );
+            liftedUsages += 1;
+          }
+        }
+
+        removePropValue(
+          sourceProperty,
+          options.sourcePropName,
+          sourceValues,
+          sourceValue,
+        );
+
+        return {
+          liftedUsages,
+          unsupported,
+        };
+      },
+      catch: preserveSweepyError,
+    });
+    const changedFiles = yield* formatAndGetChangedFiles(
+      options.repositoryRoot,
     );
-
-  return {
-    changedFiles,
-    liftedUsages,
-    project,
-    unsupported,
-  };
-};
+    return { changedFiles, liftedUsages, unsupported };
+  });
 
 export const liftPropValue = (options: LiftPropValueOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, liftedUsages, project, unsupported } =
-      yield* Effect.try({
-        try: () => prepareLift(options),
-        catch: preserveSweepyError,
-      });
+    const { changedFiles, liftedUsages, unsupported } =
+      yield* prepareLift(options);
 
     yield* Console.log(`Lifted ${liftedUsages} usage(s).`);
     if (unsupported.length > 0) {
@@ -195,7 +195,6 @@ export const liftPropValue = (options: LiftPropValueOptions) =>
     }
 
     const saved = yield* executeChanges({
-      project,
       changedFiles,
       repositoryRoot: options.repositoryRoot,
       yes: options.yes,

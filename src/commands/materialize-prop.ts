@@ -5,7 +5,6 @@ import {
   type Expression,
   type JsxAttribute,
   Node,
-  Project,
   type PropertySignature,
   type SourceFile,
   SyntaxKind,
@@ -28,10 +27,12 @@ import {
 import { executeChanges } from "../execute-changes";
 import {
   type ComponentFunction,
+  formatAndGetChangedFiles,
   getComponentFunction,
   getLocalComponentNames,
   getOrExtractPropsDeclaration,
 } from "../prop-action";
+import { TsMorphProject } from "../ts-morph-project";
 import {
   formatUnsupportedCases,
   type UnsupportedCase,
@@ -581,176 +582,199 @@ const getAttributeExpression = (attribute: JsxAttribute) => {
   return expression;
 };
 
+const loadMaterializationProject = ({
+  repositoryRoot,
+  componentName,
+  searchRoot,
+  componentFile,
+}: Pick<
+  MaterializePropOptions,
+  "repositoryRoot" | "componentName" | "searchRoot" | "componentFile"
+>) =>
+  Effect.gen(function* () {
+    const project = yield* TsMorphProject;
+    return yield* Effect.try({
+      try: () => {
+        const absoluteSearchRoot = path.resolve(repositoryRoot, searchRoot);
+        project.addSourceFilesAtPaths([
+          path.join(absoluteSearchRoot, "**/*.ts"),
+          path.join(absoluteSearchRoot, "**/*.tsx"),
+        ]);
+
+        const absoluteComponentFile =
+          componentFile === undefined
+            ? undefined
+            : path.resolve(repositoryRoot, componentFile);
+        if (absoluteComponentFile !== undefined) {
+          project.addSourceFileAtPathIfExists(absoluteComponentFile);
+        }
+
+        const sourceFiles = project.getSourceFiles();
+        if (sourceFiles.length === 0) {
+          throw new NoSourceFilesError({ searchRoot });
+        }
+
+        const { sourceFile: componentSource, componentFunction } =
+          findComponent(
+            sourceFiles,
+            componentName,
+            absoluteComponentFile,
+            searchRoot,
+          );
+        return { componentFunction, componentSource, sourceFiles };
+      },
+      catch: preserveSweepyError,
+    });
+  });
+
 const prepareMaterialization = ({
   repositoryRoot,
   componentName,
   propsTypeName,
   searchRoot,
-  tsconfigPath,
   componentFile,
   propName,
-}: MaterializePropOptions) => {
-  const absoluteTsconfig = path.resolve(repositoryRoot, tsconfigPath);
-  const absoluteSearchRoot = path.resolve(repositoryRoot, searchRoot);
-  const project = new Project({
-    tsConfigFilePath: absoluteTsconfig,
-    skipAddingFilesFromTsConfig: true,
-  });
-  project.addSourceFilesAtPaths([
-    path.join(absoluteSearchRoot, "**/*.ts"),
-    path.join(absoluteSearchRoot, "**/*.tsx"),
-  ]);
+}: MaterializePropOptions) =>
+  Effect.gen(function* () {
+    const { componentFunction, componentSource, sourceFiles } =
+      yield* loadMaterializationProject({
+        repositoryRoot,
+        componentName,
+        searchRoot,
+        componentFile,
+      });
+    const { unsupported } = yield* Effect.try({
+      try: () => {
+        const isClassName = propName === "className";
+        const discoveredValues = new Map<string, MaterializedValue>();
+        const unsupported: Array<UnsupportedCase> = [];
 
-  const absoluteComponentFile =
-    componentFile === undefined
-      ? undefined
-      : path.resolve(repositoryRoot, componentFile);
-  if (absoluteComponentFile !== undefined) {
-    project.addSourceFileAtPathIfExists(absoluteComponentFile);
-  }
-
-  const sourceFiles = project.getSourceFiles();
-  if (sourceFiles.length === 0) {
-    throw new NoSourceFilesError({ searchRoot });
-  }
-
-  const { sourceFile: componentSource, componentFunction } = findComponent(
-    sourceFiles,
-    componentName,
-    absoluteComponentFile,
-    searchRoot,
-  );
-
-  const isClassName = propName === "className";
-  const discoveredValues = new Map<string, MaterializedValue>();
-  const unsupported: Array<UnsupportedCase> = [];
-
-  const firstParameter = componentFunction.getParameters()[0];
-  const bindingPattern = firstParameter?.getNameNode();
-  if (
-    bindingPattern !== undefined &&
-    Node.isObjectBindingPattern(bindingPattern)
-  ) {
-    const binding = bindingPattern
-      .getElements()
-      .find((element) => element.getName() === propName);
-    const initializer = binding?.getInitializer();
-    if (initializer !== undefined) {
-      const analyzed = analyzeExpression(initializer, isClassName);
-      if (analyzed !== undefined) collectValues(analyzed, discoveredValues);
-    }
-  }
-
-  for (const sourceFile of sourceFiles) {
-    const localComponentNames = getLocalComponentNames(
-      sourceFile,
-      componentSource,
-      componentName,
-    );
-    if (localComponentNames.size === 0) continue;
-
-    const openingElements = [
-      ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
-      ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement),
-    ];
-
-    for (const element of openingElements) {
-      if (!localComponentNames.has(element.getTagNameNode().getText()))
-        continue;
-      const attribute = element
-        .getAttributes()
-        .find(
-          (candidate): candidate is JsxAttribute =>
-            Node.isJsxAttribute(candidate) &&
-            candidate.getNameNode().getText() === propName,
-        );
-      if (attribute === undefined) continue;
-
-      const expression = getAttributeExpression(attribute);
-      if (expression === undefined) {
-        unsupported.push({
-          kind: "usage",
-          filePath: path.relative(repositoryRoot, sourceFile.getFilePath()),
-          lineNumber: attribute.getStartLineNumber(),
-          source: attribute.getText(),
-          reason: { kind: "prop-value-not-static" },
-        });
-        continue;
-      }
-
-      if ("kind" in expression) {
-        collectValues(expression, discoveredValues);
-        continue;
-      }
-
-      const analyzed = analyzeExpression(expression, isClassName);
-      if (analyzed === undefined) {
-        unsupported.push({
-          kind: "usage",
-          filePath: path.relative(repositoryRoot, sourceFile.getFilePath()),
-          lineNumber: attribute.getStartLineNumber(),
-          source: attribute.getText(),
-          reason: { kind: "prop-value-not-static" },
-        });
-        continue;
-      }
-
-      collectValues(analyzed, discoveredValues);
-      if (
-        analyzed.kind === "conditional" ||
-        Node.isTemplateExpression(expression) ||
-        Node.isBinaryExpression(expression)
-      ) {
-        const rendered = renderExpression(analyzed);
-        if (expression.getText() !== rendered) {
-          attribute.setInitializer(`{${rendered}}`);
+        const firstParameter = componentFunction.getParameters()[0];
+        const bindingPattern = firstParameter?.getNameNode();
+        if (
+          bindingPattern !== undefined &&
+          Node.isObjectBindingPattern(bindingPattern)
+        ) {
+          const binding = bindingPattern
+            .getElements()
+            .find((element) => element.getName() === propName);
+          const initializer = binding?.getInitializer();
+          if (initializer !== undefined) {
+            const analyzed = analyzeExpression(initializer, isClassName);
+            if (analyzed !== undefined)
+              collectValues(analyzed, discoveredValues);
+          }
         }
-      }
-    }
-  }
 
-  const values = [...discoveredValues.values()];
-  if (values.length === 0) {
-    throw new NoSupportedPropValuesError({
-      componentName,
-      propName,
-      unsupported,
+        for (const sourceFile of sourceFiles) {
+          const localComponentNames = getLocalComponentNames(
+            sourceFile,
+            componentSource,
+            componentName,
+          );
+          if (localComponentNames.size === 0) continue;
+
+          const openingElements = [
+            ...sourceFile.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
+            ...sourceFile.getDescendantsOfKind(
+              SyntaxKind.JsxSelfClosingElement,
+            ),
+          ];
+
+          for (const element of openingElements) {
+            if (!localComponentNames.has(element.getTagNameNode().getText()))
+              continue;
+            const attribute = element
+              .getAttributes()
+              .find(
+                (candidate): candidate is JsxAttribute =>
+                  Node.isJsxAttribute(candidate) &&
+                  candidate.getNameNode().getText() === propName,
+              );
+            if (attribute === undefined) continue;
+
+            const expression = getAttributeExpression(attribute);
+            if (expression === undefined) {
+              unsupported.push({
+                kind: "usage",
+                filePath: path.relative(
+                  repositoryRoot,
+                  sourceFile.getFilePath(),
+                ),
+                lineNumber: attribute.getStartLineNumber(),
+                source: attribute.getText(),
+                reason: { kind: "prop-value-not-static" },
+              });
+              continue;
+            }
+
+            if ("kind" in expression) {
+              collectValues(expression, discoveredValues);
+              continue;
+            }
+
+            const analyzed = analyzeExpression(expression, isClassName);
+            if (analyzed === undefined) {
+              unsupported.push({
+                kind: "usage",
+                filePath: path.relative(
+                  repositoryRoot,
+                  sourceFile.getFilePath(),
+                ),
+                lineNumber: attribute.getStartLineNumber(),
+                source: attribute.getText(),
+                reason: { kind: "prop-value-not-static" },
+              });
+              continue;
+            }
+
+            collectValues(analyzed, discoveredValues);
+            if (
+              analyzed.kind === "conditional" ||
+              Node.isTemplateExpression(expression) ||
+              Node.isBinaryExpression(expression)
+            ) {
+              const rendered = renderExpression(analyzed);
+              if (expression.getText() !== rendered) {
+                attribute.setInitializer(`{${rendered}}`);
+              }
+            }
+          }
+        }
+
+        const values = [...discoveredValues.values()];
+        if (values.length === 0) {
+          throw new NoSupportedPropValuesError({
+            componentName,
+            propName,
+            unsupported,
+          });
+        }
+
+        const materializedType = values
+          .map((literal) => JSON.stringify(literal))
+          .join(" | ");
+        rewritePropType({
+          sourceFile: componentSource,
+          componentFunction,
+          componentName,
+          propsTypeName,
+          propName,
+          type: materializedType,
+        });
+
+        return { unsupported };
+      },
+      catch: preserveSweepyError,
     });
-  }
-
-  const materializedType = values
-    .map((literal) => JSON.stringify(literal))
-    .join(" | ");
-  rewritePropType({
-    sourceFile: componentSource,
-    componentFunction,
-    componentName,
-    propsTypeName,
-    propName,
-    type: materializedType,
+    const changedFiles = yield* formatAndGetChangedFiles(repositoryRoot);
+    return { changedFiles, unsupported };
   });
-
-  for (const sourceFile of project.getSourceFiles()) {
-    if (sourceFile.isSaved()) continue;
-    sourceFile.formatText({ indentSize: 2 });
-  }
-
-  const changedFiles = project
-    .getSourceFiles()
-    .filter((sourceFile) => !sourceFile.isSaved())
-    .map((sourceFile) =>
-      path.relative(repositoryRoot, sourceFile.getFilePath()),
-    );
-
-  return { project, changedFiles, unsupported };
-};
 
 export const materializeProp = (options: MaterializePropOptions) =>
   Effect.gen(function* () {
-    const { changedFiles, project, unsupported } = yield* Effect.try({
-      try: () => prepareMaterialization(options),
-      catch: preserveSweepyError,
-    });
+    const { changedFiles, unsupported } =
+      yield* prepareMaterialization(options);
 
     if (unsupported.length > 0) {
       yield* Console.log(
@@ -764,7 +788,6 @@ export const materializeProp = (options: MaterializePropOptions) =>
     }
 
     const saved = yield* executeChanges({
-      project,
       changedFiles,
       repositoryRoot: options.repositoryRoot,
       yes: options.yes,
