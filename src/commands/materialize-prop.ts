@@ -2,11 +2,7 @@ import path from "node:path";
 
 import { Console, Effect, Schema } from "effect";
 import {
-  type ArrowFunction,
-  type CallExpression,
   type Expression,
-  type FunctionDeclaration,
-  type FunctionExpression,
   type JsxAttribute,
   Node,
   Project,
@@ -18,6 +14,12 @@ import {
 } from "ts-morph";
 
 import { confirm } from "../confirm";
+import {
+  type ComponentFunction,
+  getComponentFunction,
+  getLocalComponentNames,
+  getOrExtractPropsDeclaration,
+} from "../prop-action";
 
 type FiniteValue = string | number;
 
@@ -29,11 +31,6 @@ type FiniteExpression =
       readonly whenTrue: FiniteExpression;
       readonly whenFalse: FiniteExpression;
     };
-
-type ComponentFunction =
-  | FunctionDeclaration
-  | ArrowFunction
-  | FunctionExpression;
 
 type MaterializePropOptions = {
   readonly repositoryRoot: string;
@@ -207,60 +204,6 @@ const renderExpression = (expression: FiniteExpression): string => {
   return `${expression.condition} ? ${renderExpression(expression.whenTrue)} : ${renderExpression(expression.whenFalse)}`;
 };
 
-const getForwardRefCall = (
-  initializer: Expression | undefined,
-): CallExpression | undefined => {
-  if (initializer === undefined) return undefined;
-
-  const expression = unwrapExpression(initializer);
-  if (!Node.isCallExpression(expression)) return undefined;
-
-  const callee = expression.getExpression().getText();
-  if (callee !== "forwardRef" && !callee.endsWith(".forwardRef")) {
-    return undefined;
-  }
-
-  return expression;
-};
-
-const getForwardRefRenderFunction = (
-  initializer: Expression | undefined,
-): ComponentFunction | undefined => {
-  const renderFunction = getForwardRefCall(initializer)?.getArguments()[0];
-  if (
-    renderFunction !== undefined &&
-    (Node.isArrowFunction(renderFunction) ||
-      Node.isFunctionExpression(renderFunction))
-  ) {
-    return renderFunction;
-  }
-
-  return undefined;
-};
-
-const getComponentFunction = (
-  sourceFile: SourceFile,
-  componentName: string,
-): ComponentFunction | undefined => {
-  const declaration = sourceFile.getFunction(componentName);
-  if (declaration !== undefined) return declaration;
-
-  const initializer = sourceFile
-    .getVariableDeclarations()
-    .find((candidate) => candidate.getName() === componentName)
-    ?.getInitializer();
-
-  if (
-    initializer !== undefined &&
-    (Node.isArrowFunction(initializer) ||
-      Node.isFunctionExpression(initializer))
-  ) {
-    return initializer;
-  }
-
-  return getForwardRefRenderFunction(initializer);
-};
-
 const findComponent = (
   sourceFiles: ReadonlyArray<SourceFile>,
   componentName: string,
@@ -374,37 +317,6 @@ const ensurePropOnTypeAlias = (
   );
 };
 
-const insertTypeAliasBeforeComponent = ({
-  sourceFile,
-  componentFunction,
-  propsTypeName,
-  type,
-}: {
-  readonly sourceFile: SourceFile;
-  readonly componentFunction: ComponentFunction;
-  readonly propsTypeName: string;
-  readonly type: string;
-}) => {
-  const statement = Node.isStatement(componentFunction)
-    ? componentFunction
-    : componentFunction.getFirstAncestor((ancestor) =>
-        Node.isStatement(ancestor),
-      );
-  if (statement === undefined) {
-    throw new Error(`Could not extract inline props for ${propsTypeName}`);
-  }
-
-  const statementIndex = sourceFile.getStatements().indexOf(statement);
-  if (statementIndex === -1) {
-    throw new Error(`Could not extract inline props for ${propsTypeName}`);
-  }
-
-  return sourceFile.insertTypeAlias(statementIndex, {
-    name: propsTypeName,
-    type,
-  });
-};
-
 const rewritePropType = ({
   sourceFile,
   componentFunction,
@@ -420,15 +332,14 @@ const rewritePropType = ({
   readonly propName: string;
   readonly type: string;
 }) => {
-  const typeAlias = sourceFile.getTypeAlias(propsTypeName);
-  if (typeAlias !== undefined) {
-    ensurePropOnTypeAlias(typeAlias, propName, type);
-    return;
-  }
-
-  const interfaceDeclaration = sourceFile.getInterface(propsTypeName);
-  if (interfaceDeclaration !== undefined) {
-    const property = interfaceDeclaration.getProperty(propName);
+  const declaration = getOrExtractPropsDeclaration({
+    sourceFile,
+    componentFunction,
+    componentName,
+    propsTypeName,
+  });
+  if (Node.isInterfaceDeclaration(declaration)) {
+    const property = declaration.getProperty(propName);
     if (property === undefined) {
       throw new Error(`Prop ${propName} not found in ${propsTypeName}`);
     }
@@ -436,41 +347,7 @@ const rewritePropType = ({
     return;
   }
 
-  const parameter = componentFunction.getParameters()[0];
-  const inlineType = parameter?.getTypeNode();
-  if (
-    parameter !== undefined &&
-    inlineType !== undefined &&
-    Node.isTypeLiteral(inlineType)
-  ) {
-    const extracted = insertTypeAliasBeforeComponent({
-      sourceFile,
-      componentFunction,
-      propsTypeName,
-      type: inlineType.getText(),
-    });
-    parameter.setType(propsTypeName);
-    ensurePropOnTypeAlias(extracted, propName, type);
-    return;
-  }
-
-  const initializer = sourceFile
-    .getVariableDeclaration(componentName)
-    ?.getInitializer();
-  const forwardRefPropsType =
-    getForwardRefCall(initializer)?.getTypeArguments()[1];
-  if (forwardRefPropsType === undefined) {
-    throw new Error(`Props type not found: ${propsTypeName}`);
-  }
-
-  const extracted = insertTypeAliasBeforeComponent({
-    sourceFile,
-    componentFunction,
-    propsTypeName,
-    type: forwardRefPropsType.getText(),
-  });
-  forwardRefPropsType.replaceWithText(propsTypeName);
-  ensurePropOnTypeAlias(extracted, propName, type);
+  ensurePropOnTypeAlias(declaration, propName, type);
 };
 
 const getAttributeExpression = (attribute: JsxAttribute) => {
@@ -485,36 +362,6 @@ const getAttributeExpression = (attribute: JsxAttribute) => {
   const expression = initializer.getExpression();
   if (expression === undefined) return undefined;
   return expression;
-};
-
-const getLocalComponentNames = (
-  sourceFile: SourceFile,
-  componentSource: SourceFile,
-  componentName: string,
-) => {
-  const names = new Set<string>();
-  if (sourceFile === componentSource) names.add(componentName);
-
-  const componentBaseName = componentSource.getBaseNameWithoutExtension();
-  for (const declaration of sourceFile.getImportDeclarations()) {
-    const resolvedSource = declaration.getModuleSpecifierSourceFile();
-    const importedBaseName = path.posix.basename(
-      declaration.getModuleSpecifierValue(),
-    );
-    if (
-      resolvedSource !== componentSource &&
-      importedBaseName !== componentBaseName
-    ) {
-      continue;
-    }
-
-    for (const namedImport of declaration.getNamedImports()) {
-      if (namedImport.getName() !== componentName) continue;
-      names.add(namedImport.getAliasNode()?.getText() ?? componentName);
-    }
-  }
-
-  return names;
 };
 
 const prepareMaterialization = ({

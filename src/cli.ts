@@ -8,6 +8,7 @@ import { Command, Flag } from "effect/unstable/cli";
 
 import { materializeProp } from "./commands/materialize-prop";
 import { liftPropValue } from "./commands/lift-prop-value";
+import { narrowProps } from "./commands/narrow-props";
 import { replacePropValue } from "./commands/replace-prop-value";
 
 const packageJson = createRequire(import.meta.url)("../package.json") as {
@@ -148,11 +149,36 @@ const liftPropValueCommand = Command.make(
     }),
 ).pipe(Command.withDescription("Lift one static prop value to a wrapper"));
 
+const narrowPropsCommand = Command.make(
+  "narrow-props",
+  {
+    ...globalFlags,
+    yes: Flag.boolean("yes").pipe(
+      Flag.withAlias("y"),
+      Flag.withDescription("Save changes without confirmation"),
+    ),
+  },
+  (options) =>
+    narrowProps({
+      repositoryRoot: process.cwd(),
+      componentName: options.component,
+      propsTypeName: Option.getOrElse(
+        options.propsType,
+        () => `${options.component}Props`,
+      ),
+      searchRoot: options.searchRoot,
+      tsconfigPath: options.tsconfig,
+      componentFile: Option.getOrUndefined(options.componentFile),
+      yes: options.yes,
+    }),
+).pipe(Command.withDescription("Narrow component props to their used keys"));
+
 const rootCommand = Command.make("sweepy").pipe(
   Command.withSubcommands([
     materializePropCommand,
     replacePropValueCommand,
     liftPropValueCommand,
+    narrowPropsCommand,
   ]),
 );
 

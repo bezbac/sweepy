@@ -21,6 +21,11 @@ export const createReferenceProject = async () => {
     recursive: true,
     filter: (source) => path.basename(source) !== "node_modules",
   });
+  await fs.symlink(
+    path.join(referenceRoot, "node_modules"),
+    path.join(projectRoot, "node_modules"),
+    "dir",
+  );
   return projectRoot;
 };
 

@@ -10,6 +10,7 @@ describe("compiled CLI", () => {
     assert.include(stdout, "materialize-prop");
     assert.include(stdout, "replace-prop-value");
     assert.include(stdout, "lift-prop-value");
+    assert.include(stdout, "narrow-props");
   });
 
   it("reads its version from package.json", async () => {

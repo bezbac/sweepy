@@ -105,3 +105,19 @@ to:
 ```
 
 The source value is removed from the component prop definition. Dynamic or unsupported usages are reported and left unchanged.
+
+### `narrow-props`
+
+Narrows a component's props type to properties used by JSX call sites or read by the component implementation.
+
+```sh
+narrow-props --component Button
+```
+
+Flags:
+
+- `--yes`, `-y` — Save changes without asking for confirmation.
+
+Broad inherited props are wrapped in `Pick`, while unused explicit properties are removed. JSX children and statically resolvable object spreads are included. Inline and direct `forwardRef` props are extracted to a named props alias when needed.
+
+If a JSX spread or internal props usage cannot be statically enumerated, the command reports it and leaves the prop definition unchanged.
