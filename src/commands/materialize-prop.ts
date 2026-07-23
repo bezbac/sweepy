@@ -3,6 +3,7 @@ import path from "node:path";
 import { Console, Effect, Schema } from "effect";
 import {
   type ArrowFunction,
+  type CallExpression,
   type Expression,
   type FunctionDeclaration,
   type FunctionExpression,
@@ -12,6 +13,8 @@ import {
   type PropertySignature,
   type SourceFile,
   SyntaxKind,
+  type TypeAliasDeclaration,
+  type TypeLiteralNode,
 } from "ts-morph";
 
 import { confirm } from "../confirm";
@@ -204,6 +207,37 @@ const renderExpression = (expression: FiniteExpression): string => {
   return `${expression.condition} ? ${renderExpression(expression.whenTrue)} : ${renderExpression(expression.whenFalse)}`;
 };
 
+const getForwardRefCall = (
+  initializer: Expression | undefined,
+): CallExpression | undefined => {
+  if (initializer === undefined) return undefined;
+
+  const expression = unwrapExpression(initializer);
+  if (!Node.isCallExpression(expression)) return undefined;
+
+  const callee = expression.getExpression().getText();
+  if (callee !== "forwardRef" && !callee.endsWith(".forwardRef")) {
+    return undefined;
+  }
+
+  return expression;
+};
+
+const getForwardRefRenderFunction = (
+  initializer: Expression | undefined,
+): ComponentFunction | undefined => {
+  const renderFunction = getForwardRefCall(initializer)?.getArguments()[0];
+  if (
+    renderFunction !== undefined &&
+    (Node.isArrowFunction(renderFunction) ||
+      Node.isFunctionExpression(renderFunction))
+  ) {
+    return renderFunction;
+  }
+
+  return undefined;
+};
+
 const getComponentFunction = (
   sourceFile: SourceFile,
   componentName: string,
@@ -224,7 +258,7 @@ const getComponentFunction = (
     return initializer;
   }
 
-  return undefined;
+  return getForwardRefRenderFunction(initializer);
 };
 
 const findComponent = (
@@ -268,50 +302,89 @@ const findComponent = (
   return matches[0]!;
 };
 
-const getOrExtractProperty = ({
+const setPropertyType = (property: PropertySignature, type: string) => {
+  if (property.getTypeNode()?.getText() !== type) {
+    property.setType(type);
+  }
+};
+
+const ensurePropOnTypeLiteral = (
+  typeLiteral: TypeLiteralNode,
+  propName: string,
+  type: string,
+) => {
+  const property = typeLiteral.getProperty(propName);
+  if (property !== undefined) {
+    setPropertyType(property, type);
+    property.setHasQuestionToken(true);
+    return;
+  }
+
+  typeLiteral.insertProperty(0, {
+    name: propName,
+    hasQuestionToken: true,
+    type,
+  });
+};
+
+const shouldOmitInheritedProp = (type: string) =>
+  type.includes("HTMLAttributes") ||
+  type.includes("ComponentProps") ||
+  type.includes("ComponentPropsWithoutRef") ||
+  type.includes("ComponentPropsWithRef");
+
+const omitLooseProp = (type: string, propName: string) => {
+  if (type.startsWith("Omit<") || !shouldOmitInheritedProp(type)) return type;
+  return `Omit<${type}, ${JSON.stringify(propName)}>`;
+};
+
+const ensurePropOnTypeAlias = (
+  typeAlias: TypeAliasDeclaration,
+  propName: string,
+  type: string,
+) => {
+  const typeNode = typeAlias.getTypeNodeOrThrow();
+  if (Node.isTypeLiteral(typeNode)) {
+    ensurePropOnTypeLiteral(typeNode, propName, type);
+    return;
+  }
+
+  if (Node.isIntersectionTypeNode(typeNode)) {
+    const typeLiteral = typeNode
+      .getTypeNodes()
+      .find((candidate): candidate is TypeLiteralNode =>
+        Node.isTypeLiteral(candidate),
+      );
+    if (typeLiteral !== undefined) {
+      ensurePropOnTypeLiteral(typeLiteral, propName, type);
+      for (const inheritedType of typeNode.getTypeNodes()) {
+        if (Node.isTypeLiteral(inheritedType)) continue;
+        const inheritedTypeText = inheritedType.getText();
+        const narrowedType = omitLooseProp(inheritedTypeText, propName);
+        if (narrowedType !== inheritedTypeText) {
+          inheritedType.replaceWithText(narrowedType);
+        }
+      }
+      return;
+    }
+  }
+
+  typeAlias.setType(
+    `${omitLooseProp(typeNode.getText(), propName)} & { ${propName}?: ${type} }`,
+  );
+};
+
+const insertTypeAliasBeforeComponent = ({
   sourceFile,
   componentFunction,
   propsTypeName,
-  propName,
+  type,
 }: {
   readonly sourceFile: SourceFile;
   readonly componentFunction: ComponentFunction;
   readonly propsTypeName: string;
-  readonly propName: string;
-}): PropertySignature => {
-  const typeAlias = sourceFile.getTypeAlias(propsTypeName);
-  if (typeAlias !== undefined) {
-    const typeNode = typeAlias.getTypeNodeOrThrow();
-    if (!Node.isTypeLiteral(typeNode)) {
-      throw new Error(`${propsTypeName} must be an object type`);
-    }
-    const property = typeNode.getProperty(propName);
-    if (property === undefined) {
-      throw new Error(`Prop ${propName} not found in ${propsTypeName}`);
-    }
-    return property;
-  }
-
-  const interfaceDeclaration = sourceFile.getInterface(propsTypeName);
-  if (interfaceDeclaration !== undefined) {
-    const property = interfaceDeclaration.getProperty(propName);
-    if (property === undefined) {
-      throw new Error(`Prop ${propName} not found in ${propsTypeName}`);
-    }
-    return property;
-  }
-
-  const parameter = componentFunction.getParameters()[0];
-  const inlineType = parameter?.getTypeNode();
-  if (
-    parameter === undefined ||
-    inlineType === undefined ||
-    !Node.isTypeLiteral(inlineType)
-  ) {
-    throw new Error(`Props type not found: ${propsTypeName}`);
-  }
-
-  const inlineTypeText = inlineType.getText();
+  readonly type: string;
+}) => {
   const statement = Node.isStatement(componentFunction)
     ? componentFunction
     : componentFunction.getFirstAncestor((ancestor) =>
@@ -320,22 +393,84 @@ const getOrExtractProperty = ({
   if (statement === undefined) {
     throw new Error(`Could not extract inline props for ${propsTypeName}`);
   }
-  const statementIndex = sourceFile.getStatements().indexOf(statement);
-  const extracted = sourceFile.insertTypeAlias(statementIndex, {
-    name: propsTypeName,
-    type: inlineTypeText,
-  });
-  parameter.setType(propsTypeName);
 
-  const extractedType = extracted.getTypeNodeOrThrow();
-  if (!Node.isTypeLiteral(extractedType)) {
+  const statementIndex = sourceFile.getStatements().indexOf(statement);
+  if (statementIndex === -1) {
     throw new Error(`Could not extract inline props for ${propsTypeName}`);
   }
-  const property = extractedType.getProperty(propName);
-  if (property === undefined) {
-    throw new Error(`Prop ${propName} not found in ${propsTypeName}`);
+
+  return sourceFile.insertTypeAlias(statementIndex, {
+    name: propsTypeName,
+    type,
+  });
+};
+
+const rewritePropType = ({
+  sourceFile,
+  componentFunction,
+  componentName,
+  propsTypeName,
+  propName,
+  type,
+}: {
+  readonly sourceFile: SourceFile;
+  readonly componentFunction: ComponentFunction;
+  readonly componentName: string;
+  readonly propsTypeName: string;
+  readonly propName: string;
+  readonly type: string;
+}) => {
+  const typeAlias = sourceFile.getTypeAlias(propsTypeName);
+  if (typeAlias !== undefined) {
+    ensurePropOnTypeAlias(typeAlias, propName, type);
+    return;
   }
-  return property;
+
+  const interfaceDeclaration = sourceFile.getInterface(propsTypeName);
+  if (interfaceDeclaration !== undefined) {
+    const property = interfaceDeclaration.getProperty(propName);
+    if (property === undefined) {
+      throw new Error(`Prop ${propName} not found in ${propsTypeName}`);
+    }
+    setPropertyType(property, type);
+    return;
+  }
+
+  const parameter = componentFunction.getParameters()[0];
+  const inlineType = parameter?.getTypeNode();
+  if (
+    parameter !== undefined &&
+    inlineType !== undefined &&
+    Node.isTypeLiteral(inlineType)
+  ) {
+    const extracted = insertTypeAliasBeforeComponent({
+      sourceFile,
+      componentFunction,
+      propsTypeName,
+      type: inlineType.getText(),
+    });
+    parameter.setType(propsTypeName);
+    ensurePropOnTypeAlias(extracted, propName, type);
+    return;
+  }
+
+  const initializer = sourceFile
+    .getVariableDeclaration(componentName)
+    ?.getInitializer();
+  const forwardRefPropsType =
+    getForwardRefCall(initializer)?.getTypeArguments()[1];
+  if (forwardRefPropsType === undefined) {
+    throw new Error(`Props type not found: ${propsTypeName}`);
+  }
+
+  const extracted = insertTypeAliasBeforeComponent({
+    sourceFile,
+    componentFunction,
+    propsTypeName,
+    type: forwardRefPropsType.getText(),
+  });
+  forwardRefPropsType.replaceWithText(propsTypeName);
+  ensurePropOnTypeAlias(extracted, propName, type);
 };
 
 const getAttributeExpression = (attribute: JsxAttribute) => {
@@ -421,12 +556,6 @@ const prepareMaterialization = ({
     componentName,
     absoluteComponentFile,
   );
-  const property = getOrExtractProperty({
-    sourceFile: componentSource,
-    componentFunction,
-    propsTypeName,
-    propName,
-  });
 
   const isClassName = propName === "className";
   const discoveredValues = new Map<string, FiniteValue>();
@@ -518,9 +647,14 @@ const prepareMaterialization = ({
   const materializedType = values
     .map((literal) => JSON.stringify(literal))
     .join(" | ");
-  if (property.getTypeNode()?.getText() !== materializedType) {
-    property.setType(materializedType);
-  }
+  rewritePropType({
+    sourceFile: componentSource,
+    componentFunction,
+    componentName,
+    propsTypeName,
+    propName,
+    type: materializedType,
+  });
 
   for (const sourceFile of project.getSourceFiles()) {
     if (sourceFile.isSaved()) continue;

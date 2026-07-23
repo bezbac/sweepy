@@ -76,6 +76,25 @@ describe("materialize-prop", () => {
     await assertFixtureFiles(projectRoot, "materialize-prop/logo-size");
   });
 
+  it("materializes inherited props on a forwardRef component", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const { exitCode } = await runCliInProject(projectRoot, [
+      "materialize-prop",
+      "--component",
+      "ForwardRefButton",
+      "--prop",
+      "className",
+      "--yes",
+    ]);
+
+    assert.strictEqual(exitCode, 0);
+    await assertFixtureFiles(
+      projectRoot,
+      "materialize-prop/forward-ref-button-class-name",
+    );
+  });
+
   it("leaves files byte-for-byte unchanged when confirmation is declined", async () => {
     const projectRoot = await createReferenceProject();
     const changedPaths = [
