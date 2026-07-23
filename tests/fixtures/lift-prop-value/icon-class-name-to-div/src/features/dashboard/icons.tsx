@@ -1,5 +1,6 @@
 import React from "react";
 import type { ReactNode } from "react";
+
 import { Icon, Icon as Mark, type IconProps } from "../../components/ui/icon";
 
 function Wrapper({ size, children }: { size: 32; children: ReactNode }) {

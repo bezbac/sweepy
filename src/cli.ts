@@ -6,8 +6,8 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
-import { materializeProp } from "./commands/materialize-prop";
 import { liftPropValue } from "./commands/lift-prop-value";
+import { materializeProp } from "./commands/materialize-prop";
 import { narrowProps } from "./commands/narrow-props";
 import { replacePropValue } from "./commands/replace-prop-value";
 

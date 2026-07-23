@@ -1,6 +1,6 @@
+import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
-import assert from "node:assert/strict";
 import path from "node:path";
 import { promisify } from "node:util";
 
