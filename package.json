@@ -14,7 +14,8 @@
     "prepare": "effect-tsgo patch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "validate": "pnpm format && pnpm knip && pnpm test && pnpm typecheck && pnpm build"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.97",
