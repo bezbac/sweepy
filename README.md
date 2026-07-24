@@ -1,123 +1,45 @@
-# Sweepy
+<p align="center">
+  <img src="./resources/logo.svg" alt="Sweepy" width="640" />
+</p>
+
+---
+
+# Introduction
+
+Sweepy is a TypeScript CLI for safely refactoring React components and their usages.
+
+## Installation
+
+```sh
+pnpm install
+pnpm build
+pnpm add -g "file:$PWD"
+```
 
 ## Commands
 
-All commands share these flags:
+- `materialize-prop` derives a strict prop type from static usages.
+- `replace-prop-value` replaces one static prop value with another.
+- `lift-prop-value` moves a static prop value to a wrapper.
+- `narrow-props` limits component props to the keys in use.
 
-- `--component` — Component name. Defaults to `Button`.
-- `--props-type` — Props type/interface name. Defaults to `${ComponentName}Props`.
-- `--search-root` — Usage search root. Defaults to `src`.
-- `--tsconfig` — TypeScript config path. Defaults to `tsconfig.json`.
-- `--component-file` — Component definition file path. Auto-detected when omitted.
+Run `sweepy --help` or `sweepy <command> --help` for available options. Changes require confirmation by default; use `--dry-run` to preview them or `--yes` to apply them without confirmation.
 
-Relative paths are resolved from the repository root.
+## Development
 
-### `materialize-prop`
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for project conventions.
 
-Materializes a prop's type definition based on its current usages, turning a loose type into a strict union of discovered values.
+## AI-Assisted Development
 
-```sh
-materialize-prop --component Button --prop className
-```
+This project was developed using AI-assisted coding tools to accelerate implementation, refactoring, testing, and documentation.
 
-Flags:
+All code was reviewed, modified where appropriate, tested, and accepted by the project maintainers. Responsibility for the design, correctness, security, and licensing of this repository remains with the human authors.
 
-- `--prop` — Prop name to materialize.
-- `--yes`, `-y` — Save changes without asking for confirmation.
+## Attribution
 
-- Finds JSX usages and destructured prop defaults with supported string or numeric prop values.
-- Rewrites the prop type to a strict union of discovered values. Inline object props are first extracted to a named `type` above the component.
-- Rewrites supported JSX usages so finite dynamic expressions become explicit prop variants.
-- Asks before saving files.
+This project's logo contains a stylized depiction of the React logo.
 
-Supported `className` expressions are limited to finite class string variants. This includes string literals, ternaries with static branches, `condition && "class"`, and template literals whose interpolations are also finite class string variants. Multiple conditionals are expanded into a nested conditional prop expression. Constants, object style class names, function calls, and dynamic arguments are reported and left unchanged.
+The React logo is licensed under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license, as described in the React documentation repository:
+https://github.com/reactjs/reactjs.org/blob/master/LICENSE-DOCS.md
 
-Other props support string and numeric literals, plus ternaries whose branches are also supported literal values. Constants and function calls are reported and left unchanged.
-
-### `replace-prop-value`
-
-Replaces one static component prop value with another prop value.
-
-```sh
-replace-prop-value \
-  --component Logo \
-  --source-prop className --source-value "h-8 w-8" \
-  --target-prop size --target-value 32
-```
-
-Flags:
-
-- `--source-prop` — Prop to replace from.
-- `--source-value` — Value to replace from.
-- `--target-prop` — Prop to replace to.
-- `--target-value` — Value to replace to.
-
-For example, the above rewrites:
-
-```tsx
-<Logo className="h-8 w-8" />
-```
-
-to:
-
-```tsx
-<Logo size={32} />
-```
-
-If a selected prop is typed as `string`, `number`, or another non-literal type, the command stops and asks you to run `materialize-prop` first.
-
-If the target prop already exists with the requested value, the source prop is removed. If it exists with a different value, the usage is reported and left unchanged.
-
-The source value is also removed from the component prop definition. The target value is added to the target prop definition when it is missing.
-
-### `lift-prop-value`
-
-Moves one static component prop value from matching component usages to a wrapper component or tag.
-
-```sh
-lift-prop-value \
-  --component Logo \
-  --source-prop className --source-value "hidden scale-120" \
-  --wrapper div
-```
-
-Flags:
-
-- `--source-prop` — Prop to lift from.
-- `--source-value` — Value to lift.
-- `--wrapper` — Wrapper component or tag. Defaults to `div`.
-
-For example, the above rewrites:
-
-```tsx
-<Logo
-  size={28}
-  className="hidden scale-120 group-data-[collapsible=icon]:block"
-/>
-```
-
-to:
-
-```tsx
-<div className="hidden scale-120 group-data-[collapsible=icon]:block">
-  <Logo size={28} />
-</div>
-```
-
-The source value is removed from the component prop definition. Dynamic or unsupported usages are reported and left unchanged.
-
-### `narrow-props`
-
-Narrows a component's props type to properties used by JSX call sites or read by the component implementation.
-
-```sh
-narrow-props --component Button
-```
-
-Flags:
-
-- `--yes`, `-y` — Save changes without asking for confirmation.
-
-Broad inherited props are wrapped in `Pick`, while unused explicit properties are removed. JSX children and statically resolvable object spreads are included. Inline and direct `forwardRef` props are extracted to a named props alias when needed.
-
-If a JSX spread or internal props usage cannot be statically enumerated, the command reports it and leaves the prop definition unchanged.
+React is a trademark of Meta Platforms, Inc. This project is not affiliated with, endorsed by, or sponsored by Meta or the React project.

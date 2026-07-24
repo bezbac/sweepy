@@ -22,7 +22,7 @@ Represent unsafe transformations with structured `UnsupportedCase` values, not s
 
 ## Testing
 
-For successful transformations, assert the exit status and resulting fixture files. Do not assert informational CLI output as this is less stable. Reserve output assertions for diagnostics on failure paths.
+For successful transformations, assert the exit status and resulting fixture files. Do not assert informational CLI output because it is less stable. Reserve output assertions for diagnostics on failure paths.
 
 Keep each command's tests in its matching `tests/<command>.test.ts` file, including shared command behavior such as `--dry-run`. Reserve `tests/cli.test.ts` for root CLI behavior such as help and version output.
 
@@ -36,7 +36,7 @@ code --diff \
   tests/fixtures/narrow-props/empty-inherited-alias/src/components/ui/filter-toggle.tsx
 ```
 
-The reference file opens on the left and the expected fixture on the right. Add `--wait` when opening several diffs sequentially from a script.
+The reference file opens on the left and the expected fixture opens on the right. Add `--wait` when opening several diffs sequentially from a script.
 
 ## Install the CLI
 
