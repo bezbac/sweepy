@@ -80,6 +80,51 @@ describe("narrow-props", () => {
     await assertFixtureFiles(projectRoot, "narrow-props/narrow-link");
   });
 
+  it("removes an inherited alias part when none of its props are used", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "narrow-props",
+      "--component",
+      "EmptyInheritedAlias",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(projectRoot, "narrow-props/empty-inherited-alias");
+  });
+
+  it("removes inherited interface props when none are used", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "narrow-props",
+      "--component",
+      "EmptyInheritedInterface",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(
+      projectRoot,
+      "narrow-props/empty-inherited-interface",
+    );
+  });
+
+  it("uses an empty type when no standalone inherited props are used", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "narrow-props",
+      "--component",
+      "EmptyInheritedOnly",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(projectRoot, "narrow-props/empty-inherited-only");
+  });
+
   it("leaves the definition unchanged for dynamic spreads", async () => {
     const projectRoot = await createReferenceProject();
     const componentPath = "src/components/ui/narrow-button.tsx";

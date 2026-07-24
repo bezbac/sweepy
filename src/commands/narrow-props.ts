@@ -319,9 +319,7 @@ const collectIdentifierNames = (nameNode: Identifier, names: Set<string>) => {
 };
 
 const renderKeys = (keys: ReadonlyArray<string>) =>
-  keys.length === 0
-    ? "never"
-    : keys.map((key) => JSON.stringify(key)).join(" | ");
+  keys.map((key) => JSON.stringify(key)).join(" | ");
 
 const getAvailableKeys = (node: Node) =>
   new Set(
@@ -348,6 +346,7 @@ const getPickSourceTypeText = (node: TypeNode): string => {
 const getPickedTypeText = (node: TypeNode, usedNames: ReadonlySet<string>) => {
   const availableKeys = getAvailableKeys(node);
   const keys = [...usedNames].filter((name) => availableKeys.has(name)).sort();
+  if (keys.length === 0) return undefined;
   return `Pick<${getPickSourceTypeText(node)}, ${renderKeys(keys)}>`;
 };
 
@@ -565,12 +564,12 @@ const narrowTypeAlias = (
     removeUnusedMembers(typeLiteral, usedNames);
   }
 
-  const nextParts = parts.map((part) =>
-    Node.isTypeLiteral(part)
-      ? part.getText()
-      : getPickedTypeText(part, inheritedNames),
-  );
-  const nextType = nextParts.join(" & ");
+  const nextParts = parts.flatMap((part) => {
+    if (Node.isTypeLiteral(part)) return [part.getText()];
+    const pickedType = getPickedTypeText(part, inheritedNames);
+    return pickedType === undefined ? [] : [pickedType];
+  });
+  const nextType = nextParts.join(" & ") || "{}";
   if (nextType !== typeNode.getText()) declaration.setType(nextType);
   return before !== declaration.getTypeNodeOrThrow().getText();
 };
@@ -581,6 +580,7 @@ const getPickedHeritageText = (
 ) => {
   const availableKeys = getAvailableKeys(heritage);
   const keys = [...usedNames].filter((name) => availableKeys.has(name)).sort();
+  if (keys.length === 0) return undefined;
   const expression = heritage.getExpression().getText();
   const typeArguments = heritage.getTypeArguments();
   const sourceType = typeArguments[0];
@@ -623,7 +623,12 @@ const narrowInterface = (
     if (name !== undefined && !usedNames.has(name)) member.remove();
   }
   for (const heritage of [...declaration.getExtends()].reverse()) {
-    heritage.replaceWithText(getPickedHeritageText(heritage, inheritedNames));
+    const pickedHeritage = getPickedHeritageText(heritage, inheritedNames);
+    if (pickedHeritage === undefined) {
+      declaration.removeExtends(heritage);
+    } else {
+      heritage.replaceWithText(pickedHeritage);
+    }
   }
   return before !== declaration.getText();
 };
