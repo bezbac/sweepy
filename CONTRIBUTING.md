@@ -26,6 +26,18 @@ For successful transformations, assert the exit status and resulting fixture fil
 
 Keep each command's tests in its matching `tests/<command>.test.ts` file, including shared command behavior such as `--dry-run`. Reserve `tests/cli.test.ts` for root CLI behavior such as help and version output.
 
+### Reviewing Fixtures
+
+Use the VS Code CLI to compare a reference input with its expected transformed fixture:
+
+```sh
+code --diff \
+  reference/src/components/ui/filter-toggle.tsx \
+  tests/fixtures/narrow-props/empty-inherited-alias/src/components/ui/filter-toggle.tsx
+```
+
+The reference file opens on the left and the expected fixture on the right. Add `--wait` when opening several diffs sequentially from a script.
+
 ## Install the CLI
 
 Build and install the local CLI globally:
