@@ -30,6 +30,7 @@ import {
   getLocalComponentNames,
   getOrExtractPropsDeclaration,
   loadPropActionProject,
+  removeEmptyPropsDeclaration,
 } from "../prop-action";
 import {
   formatUnsupportedCases,
@@ -733,8 +734,32 @@ const prepareNarrowing = (options: NarrowPropsOptions) =>
         const narrowed = Node.isTypeAliasDeclaration(declaration)
           ? narrowTypeAlias(declaration, usedNames)
           : narrowInterface(declaration, usedNames);
+        const emptyPropsCleanup = removeEmptyPropsDeclaration({
+          declaration,
+          componentFunction,
+          componentName: options.componentName,
+        });
+        if (emptyPropsCleanup === "unsupported") {
+          unsupported.push({
+            kind: "component",
+            filePath: path.relative(
+              options.repositoryRoot,
+              componentSource.getFilePath(),
+            ),
+            reason: { kind: "empty-props-cleanup-unsupported" },
+          });
+          return {
+            collectChangedFiles: false as const,
+            unsupported,
+            usedProps: [...usedNames].sort(),
+          };
+        }
 
-        if (narrowed || !componentSource.isSaved()) {
+        if (
+          narrowed ||
+          emptyPropsCleanup === "removed" ||
+          !componentSource.isSaved()
+        ) {
           componentSource.formatText({ indentSize: 2 });
         }
         return {

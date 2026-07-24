@@ -12,10 +12,12 @@ import { executeChanges } from "../execute-changes";
 import {
   type PropActionOptions,
   formatAndGetChangedFiles,
+  getComponentFunction,
   getLocalComponentNames,
   getStaticAttributeValue,
   getStrictPropValues,
   loadPropActionProject,
+  removeEmptyPropsDeclaration,
   removePropValue,
   renderInitializer,
   selectValue,
@@ -38,7 +40,7 @@ const prepareLift = (options: LiftPropValueOptions) =>
   Effect.gen(function* () {
     const { componentSource, properties, sourceFiles } =
       yield* loadPropActionProject(options);
-    const { liftedUsages, unsupported } = yield* Effect.try({
+    const prepared = yield* Effect.try({
       try: () => {
         const sourceProperty = properties.find(
           (property) => property.getName() === options.sourcePropName,
@@ -61,6 +63,15 @@ const prepareLift = (options: LiftPropValueOptions) =>
           options.sourceValue,
           sourceValues,
           options.sourcePropName,
+        );
+        const componentFunction = getComponentFunction(
+          componentSource,
+          options.componentName,
+        );
+        const propsDeclaration = sourceProperty.getFirstAncestor(
+          (ancestor) =>
+            Node.isTypeAliasDeclaration(ancestor) ||
+            Node.isInterfaceDeclaration(ancestor),
         );
 
         const unsupported: Array<UnsupportedCase> = [];
@@ -164,18 +175,49 @@ const prepareLift = (options: LiftPropValueOptions) =>
           sourceValues,
           sourceValue,
         );
+        if (
+          propsDeclaration !== undefined &&
+          (Node.isTypeAliasDeclaration(propsDeclaration) ||
+            Node.isInterfaceDeclaration(propsDeclaration))
+        ) {
+          const emptyPropsCleanup = removeEmptyPropsDeclaration({
+            declaration: propsDeclaration,
+            componentFunction,
+            componentName: options.componentName,
+          });
+          if (emptyPropsCleanup === "unsupported") {
+            unsupported.push({
+              kind: "component",
+              filePath: path.relative(
+                options.repositoryRoot,
+                componentSource.getFilePath(),
+              ),
+              reason: { kind: "empty-props-cleanup-unsupported" },
+            });
+            return {
+              collectChangedFiles: false as const,
+              liftedUsages: 0,
+              unsupported,
+            };
+          }
+        }
 
         return {
+          collectChangedFiles: true as const,
           liftedUsages,
           unsupported,
         };
       },
       catch: preserveSweepyError,
     });
-    const changedFiles = yield* formatAndGetChangedFiles(
-      options.repositoryRoot,
-    );
-    return { changedFiles, liftedUsages, unsupported };
+    const changedFiles = prepared.collectChangedFiles
+      ? yield* formatAndGetChangedFiles(options.repositoryRoot)
+      : [];
+    return {
+      changedFiles,
+      liftedUsages: prepared.liftedUsages,
+      unsupported: prepared.unsupported,
+    };
   });
 
 export const liftPropValue = (options: LiftPropValueOptions) =>

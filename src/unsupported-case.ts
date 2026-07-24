@@ -7,6 +7,7 @@ export type UnsupportedReason =
   | { readonly kind: "props-type-not-resolved" }
   | { readonly kind: "props-interface-unsupported" }
   | { readonly kind: "props-type-unsupported" }
+  | { readonly kind: "empty-props-cleanup-unsupported" }
   | {
       readonly kind: "props-type-not-component";
       readonly propsTypeName: string;
@@ -63,6 +64,9 @@ const formatUnsupportedReason = (reason: UnsupportedReason) => {
   }
   if (reason.kind === "props-type-unsupported") {
     return "props type has an unsupported union or member";
+  }
+  if (reason.kind === "empty-props-cleanup-unsupported") {
+    return "empty props type or parameter could not be removed safely";
   }
   if (reason.kind === "props-type-not-component") {
     return `${reason.propsTypeName} is not the component's props type`;

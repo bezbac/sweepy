@@ -7,14 +7,17 @@ import {
   type Expression,
   type FunctionDeclaration,
   type FunctionExpression,
+  type Identifier,
   type InterfaceDeclaration,
   type JsxAttribute,
   Node,
   type PropertySignature,
   type Symbol as MorphSymbol,
   type SourceFile,
+  SyntaxKind,
   type TypeAliasDeclaration,
   type TypeLiteralNode,
+  type TypeReferenceNode,
 } from "ts-morph";
 
 import {
@@ -489,6 +492,164 @@ export const getOrExtractPropsDeclaration = ({
   });
   forwardRefPropsType.replaceWithText(propsTypeName);
   return extracted;
+};
+
+export const removeEmptyPropsDeclaration = ({
+  declaration,
+  componentFunction,
+  componentName,
+}: {
+  readonly declaration: PropsDeclaration;
+  readonly componentFunction: ComponentFunction | undefined;
+  readonly componentName: string;
+}) => {
+  let isEmpty: boolean;
+  if (Node.isTypeAliasDeclaration(declaration)) {
+    const typeNode = declaration.getTypeNodeOrThrow();
+    isEmpty =
+      Node.isTypeLiteral(typeNode) && typeNode.getMembers().length === 0;
+  } else {
+    isEmpty =
+      declaration.getMembers().length === 0 &&
+      declaration.getExtends().length === 0;
+  }
+  if (!isEmpty) return "not-empty" as const;
+  if (componentFunction === undefined) return "unsupported" as const;
+
+  const parameter = componentFunction.getParameters()[0];
+  const spreadReferenceRemovals: Array<() => void> = [];
+  if (parameter !== undefined) {
+    const nameNode = parameter.getNameNode();
+    const identifiers = Node.isIdentifier(nameNode)
+      ? [nameNode]
+      : Node.isObjectBindingPattern(nameNode) &&
+          nameNode
+            .getElements()
+            .every((element) => element.getDotDotDotToken() !== undefined)
+        ? nameNode
+            .getElements()
+            .map((element) => element.getNameNode())
+            .filter((name): name is Identifier => Node.isIdentifier(name))
+        : undefined;
+    if (identifiers === undefined) return "unsupported" as const;
+
+    for (const identifier of identifiers) {
+      for (const reference of identifier.findReferencesAsNodes()) {
+        const parent = reference.getParent();
+        if (
+          (Node.isJsxSpreadAttribute(parent) ||
+            Node.isSpreadAssignment(parent)) &&
+          parent.getExpression() === reference
+        ) {
+          spreadReferenceRemovals.push(() => parent.remove());
+          continue;
+        }
+        return "unsupported" as const;
+      }
+    }
+  }
+
+  const typeArgumentRemovals: Array<() => void> = [];
+  for (const reference of declaration.getNameNode().findReferencesAsNodes()) {
+    if (
+      parameter !== undefined &&
+      reference.getFirstAncestor((ancestor) => ancestor === parameter) !==
+        undefined
+    ) {
+      continue;
+    }
+
+    const typeReference = reference
+      .getAncestors()
+      .find(
+        (ancestor): ancestor is TypeReferenceNode =>
+          Node.isTypeReference(ancestor) &&
+          ancestor
+            .getTypeArguments()
+            .some(
+              (argument) =>
+                argument === reference ||
+                reference.getFirstAncestor(
+                  (referenceAncestor) => referenceAncestor === argument,
+                ) !== undefined,
+            ),
+      );
+    const variableDeclaration = typeReference?.getFirstAncestorByKind(
+      SyntaxKind.VariableDeclaration,
+    );
+    const typeName = typeReference?.getTypeName().getText();
+    if (
+      typeReference !== undefined &&
+      variableDeclaration?.getName() === componentName &&
+      (typeName === "FC" ||
+        typeName === "React.FC" ||
+        typeName === "FunctionComponent" ||
+        typeName === "React.FunctionComponent")
+    ) {
+      const typeArgument = typeReference
+        .getTypeArguments()
+        .find(
+          (argument) =>
+            argument === reference ||
+            reference.getFirstAncestor((ancestor) => ancestor === argument) !==
+              undefined,
+        );
+      if (typeArgument === undefined) return "unsupported" as const;
+      typeArgumentRemovals.push(() =>
+        typeReference.removeTypeArgument(typeArgument),
+      );
+      continue;
+    }
+
+    const callExpression = reference.getFirstAncestorByKind(
+      SyntaxKind.CallExpression,
+    );
+    const callVariable = callExpression?.getFirstAncestorByKind(
+      SyntaxKind.VariableDeclaration,
+    );
+    const callee = callExpression?.getExpression().getText();
+    if (
+      callExpression !== undefined &&
+      callVariable?.getName() === componentName &&
+      callee !== undefined &&
+      (callee === "memo" ||
+        callee.endsWith(".memo") ||
+        callee === "forwardRef" ||
+        callee.endsWith(".forwardRef"))
+    ) {
+      const typeArgument = callExpression
+        .getTypeArguments()
+        .find(
+          (argument) =>
+            argument === reference ||
+            reference.getFirstAncestor((ancestor) => ancestor === argument) !==
+              undefined,
+        );
+      if (typeArgument === undefined) return "unsupported" as const;
+      typeArgumentRemovals.push(() =>
+        callExpression.removeTypeArgument(typeArgument),
+      );
+      continue;
+    }
+
+    return "unsupported" as const;
+  }
+
+  for (const removeSpreadReference of spreadReferenceRemovals.reverse()) {
+    removeSpreadReference();
+  }
+  for (const removeTypeArgument of typeArgumentRemovals.reverse()) {
+    removeTypeArgument();
+  }
+  if (parameter !== undefined) {
+    if (componentFunction.getParameters().length === 1) {
+      parameter.remove();
+    } else {
+      parameter.replaceWithText("_props: unknown");
+    }
+  }
+  declaration.remove();
+  return "removed" as const;
 };
 
 export const getStaticAttributeValue = (attribute: JsxAttribute) => {

@@ -86,7 +86,7 @@ describe("narrow-props", () => {
     const result = await runCliInProject(projectRoot, [
       "narrow-props",
       "--component",
-      "EmptyInheritedAlias",
+      "FilterToggle",
       "--yes",
     ]);
 
@@ -100,7 +100,7 @@ describe("narrow-props", () => {
     const result = await runCliInProject(projectRoot, [
       "narrow-props",
       "--component",
-      "EmptyInheritedInterface",
+      "SidebarToggle",
       "--yes",
     ]);
 
@@ -111,18 +111,49 @@ describe("narrow-props", () => {
     );
   });
 
-  it("uses an empty type when no standalone inherited props are used", async () => {
+  it("removes standalone inherited props when none are used", async () => {
     const projectRoot = await createReferenceProject();
 
     const result = await runCliInProject(projectRoot, [
       "narrow-props",
       "--component",
-      "EmptyInheritedOnly",
+      "DismissButton",
       "--yes",
     ]);
 
     assert.strictEqual(result.exitCode, 0);
     await assertFixtureFiles(projectRoot, "narrow-props/empty-inherited-only");
+  });
+
+  it("removes empty props from a typed memo component", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "narrow-props",
+      "--component",
+      "RefreshButton",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(projectRoot, "narrow-props/empty-memo-button");
+  });
+
+  it("removes empty props from a forwardRef component", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "narrow-props",
+      "--component",
+      "SearchButton",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(
+      projectRoot,
+      "narrow-props/empty-forward-ref-button",
+    );
   });
 
   it("leaves the definition unchanged for dynamic spreads", async () => {

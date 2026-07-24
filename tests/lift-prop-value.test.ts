@@ -111,4 +111,25 @@ describe("lift-prop-value", () => {
       "lift-prop-value/icon-size-to-wrapper",
     );
   });
+
+  it("removes an empty props type and parameter", async () => {
+    const projectRoot = await createReferenceProject();
+
+    const result = await runCliInProject(projectRoot, [
+      "lift-prop-value",
+      "--component",
+      "EnvLabel",
+      "--source-prop",
+      "className",
+      "--source-value",
+      "rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900",
+      "--yes",
+    ]);
+
+    assert.strictEqual(result.exitCode, 0);
+    await assertFixtureFiles(
+      projectRoot,
+      "lift-prop-value/env-label-class-name-to-div",
+    );
+  });
 });
