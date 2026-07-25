@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import { createRequire } from "node:module";
 import path from "node:path";
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Option } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 
+import packageJson from "../package.json" with { type: "json" };
 import { liftPropValue } from "./commands/lift-prop-value";
 import { materializeProp } from "./commands/materialize-prop";
 import { narrowProps } from "./commands/narrow-props";
@@ -18,10 +18,6 @@ import {
 } from "./errors";
 import { TsMorphProject } from "./ts-morph-project";
 import { formatUnsupportedCases } from "./unsupported-case";
-
-const packageJson = createRequire(import.meta.url)("../package.json") as {
-  readonly version: string;
-};
 
 const formatCause = (cause: unknown) => {
   if (cause instanceof Error && cause.message.length > 0) return cause.message;

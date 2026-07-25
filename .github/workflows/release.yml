@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+        # Push events to any matching semantic version tag.
+        # For example, v1.10.1, v2.0.0, or v3.0.0-alpha.1.
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate version
+        run: |
+          PACKAGE_VERSION="$(node --print "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
+
+      - name: Validate
+        run: pnpm validate
+
+      - name: Pack release
+        run: pnpm run pack
+
+      - name: Create checksum
+        run: sha256sum dist/release/*.tgz > dist/release/checksums.txt
+
+      - name: Build changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get the version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/release/*.tgz
+            dist/release/checksums.txt
