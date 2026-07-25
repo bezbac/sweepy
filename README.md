@@ -10,6 +10,14 @@ Sweepy is a TypeScript CLI for safely refactoring React components and their usa
 
 ## Installation
 
+Install Node.js 22 or newer, then install Sweepy directly from a GitHub Release:
+
+```sh
+pnpm add --global https://github.com/bezbac/sweepy/releases/download/v0.1.0/sweepy-0.1.0.tgz
+```
+
+For local development:
+
 ```sh
 pnpm install
 pnpm build
